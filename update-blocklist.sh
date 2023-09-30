@@ -6,7 +6,7 @@
 function exists() { command -v "$1" >/dev/null 2>&1 ; }
 
 if [[ -z "$1" ]]; then
-  echo "Error: please specify a configuration file, e.g. $0 /etc/ipset-blocklist/ipset-blocklist.conf"
+  echo "Error: please specify a configuration file, e.g. $0 /opt/ipset-blocklist/ipset-blocklist.conf"
   exit 1
 fi
 
