@@ -40,11 +40,13 @@ EOF
     cat <<EOF > /etc/systemd/system/ipset-blocklist.service
 [Unit]
 Description=IPSet Blocklist Service
-After=network.target
+After=network-online.target
 
 [Service]
 Type=simple
 ExecStart=/usr/local/sbin/update-blocklist.sh /opt/ipset-blocklist/ipset-blocklist.conf
+Restart=always
+RestartSec=60
 
 [Install]
 WantedBy=multi-user.target
