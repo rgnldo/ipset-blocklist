@@ -29,13 +29,6 @@ install_ipset_blocklist() {
     ipset restore < /opt/ipset-blocklist/ip-blocklist.restore
     iptables -I INPUT 1 -m set --match-set blocklist src -j DROP
     
-    # Adicionar no CRON
-    cat <<EOF > /etc/cron.d/update-blocklist
-PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
-MAILTO=root
-33 23 * * * root /usr/local/sbin/update-blocklist.sh /opt/ipset-blocklist/ipset-blocklist.conf
-EOF
-
     # Criar o arquivo de serviço systemd
     cat <<EOF > /etc/systemd/system/ipset-blocklist.service
 [Unit]
@@ -52,29 +45,42 @@ RestartSec=60
 WantedBy=multi-user.target
 EOF
 
-    # Recarregar o serviço systemd
+    # Criar o arquivo do temporizador systemd
+    cat <<EOF > /etc/systemd/system/ipset-blocklist.timer
+[Unit]
+Description=Agendador diário para atualização do IPSet Blocklist
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+    # Recarregar o systemd
     systemctl daemon-reload
 
-    # Habilitar o serviço para iniciar após o boot
-    systemctl enable ipset-blocklist.service
-
-    # Iniciar o serviço systemd
-    systemctl start ipset-blocklist.service
+    # Habilitar o temporizador para iniciar após o boot
+    systemctl enable ipset-blocklist.timer
 
     echo "Instalação concluída com sucesso."
 }
 
 # Função para desinstalar o IPSet Blocklist
 uninstall_ipset_blocklist() {
-    # Parar o serviço systemd
+    # Parar o serviço e temporizador systemd
     systemctl stop ipset-blocklist.service
     systemctl disable ipset-blocklist.service
+    systemctl stop ipset-blocklist.timer
+    systemctl disable ipset-blocklist.timer
 
     # Remover arquivos e diretórios
     rm -rf /usr/local/sbin/update-blocklist.sh
     rm -rf /opt/ipset-blocklist
     rm -f /etc/systemd/system/ipset-blocklist.service
-    rm -f /etc/cron.d/update-blocklist
+    rm -f /etc/systemd/system/ipset-blocklist.timer
 
     echo "Desinstalação concluída com sucesso."
 }
@@ -106,4 +112,3 @@ while true; do
             ;;
     esac
 done
-
