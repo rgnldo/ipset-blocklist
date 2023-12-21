@@ -62,8 +62,11 @@ EOF
     # Recarregar o systemd
     systemctl daemon-reload
 
-    # Habilitar o temporizador para iniciar após o boot
+    # Habilitar o temporizador e o serviço para iniciar após o boot
     systemctl enable ipset-blocklist.timer
+    systemctl enable ipset-blocklist.service
+    systemctl start ipset-blocklist.time
+    systemctl start ipset-blocklist.service
 
     echo "Instalação concluída com sucesso."
 }
