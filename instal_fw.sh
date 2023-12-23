@@ -48,11 +48,12 @@ EOF
     # Criar o arquivo do temporizador systemd
     cat <<EOF > /etc/systemd/system/ipset-blocklist.timer
 [Unit]
-Description=Agendador diário para atualização do IPSet Blocklist
+Description=Agendador de 6 em 6 horas
 
 [Timer]
-OnCalendar=daily
-RandomizedDelaySec=1h
+OnBootSec=5min
+OnUnitActiveSec=6h
+AccuracySec=1s
 Persistent=true
 
 [Install]
