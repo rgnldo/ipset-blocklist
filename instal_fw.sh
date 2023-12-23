@@ -66,6 +66,7 @@ EOF
     # Habilitar o temporizador e o serviço para iniciar após o boot
     systemctl enable ipset-blocklist.timer
     systemctl enable ipset-blocklist.service
+    systemctl daemon-reload
     systemctl start ipset-blocklist.time
     systemctl start ipset-blocklist.service
 
