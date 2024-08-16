@@ -44,19 +44,28 @@ if ! ipset list -n|command grep -q "$IPSET_BLOCKLIST_NAME"; then
   fi
 fi
 
-# create the iptables binding if needed (or abort if does not exists and FORCE=no)
-if ! iptables -nvL INPUT|command grep -q "match-set $IPSET_BLOCKLIST_NAME"; then
-  # we may also have assumed that INPUT rule n°1 is about packets statistics (traffic monitoring)
+# Verifica se a regra necessária no iptables está presente (ou aborta se não existir e FORCE=no)
+if ! iptables -nvL INPUT | grep -q "match-set $IPSET_BLOCKLIST_NAME"; then
+  # Se FORCE não estiver definido como 'yes', solicita ao usuário para adicionar manualmente a regra necessária no iptables.
   if [[ ${FORCE:-no} != yes ]]; then
-    echo >&2 "Error: iptables does not have the needed ipset INPUT rule, add it using:"
+    echo >&2 "Erro: A regra do iptables para o ipset '$IPSET_BLOCKLIST_NAME' está ausente."
+    echo >&2 "Adicione a regra manualmente usando o seguinte comando:"
     echo >&2 "# iptables -I INPUT ${IPTABLES_IPSET_RULE_NUMBER:-1} -m set --match-set $IPSET_BLOCKLIST_NAME src -j DROP"
     exit 1
   fi
+  
+  # Tenta adicionar a regra do ipset à cadeia INPUT na posição especificada.
   if ! iptables -I INPUT "${IPTABLES_IPSET_RULE_NUMBER:-1}" -m set --match-set "$IPSET_BLOCKLIST_NAME" src -j DROP; then
-    echo >&2 "Error: while adding the --match-set ipset rule to iptables"
+    echo >&2 "Erro: Falha ao adicionar a regra do ipset ao iptables."
     exit 1
   fi
 fi
+
+# Log de pacotes bloqueados antes de descartá-los
+iptables -A INPUT -m set --match-set "$IPSET_BLOCKLIST_NAME" src -j LOG --log-prefix 'BLOCKED: ' --log-level 4
+
+# Adiciona a regra para descartar os pacotes provenientes dos IPs na blocklist
+iptables -A INPUT -m set --match-set "$IPSET_BLOCKLIST_NAME" src -j DROP
 
 IP_BLOCKLIST_TMP=$(mktemp)
 for i in "${BLOCKLISTS[@]}"
