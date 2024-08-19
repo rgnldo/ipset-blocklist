@@ -61,9 +61,6 @@ if ! iptables -nvL INPUT | grep -q "match-set $IPSET_BLOCKLIST_NAME"; then
   fi
 fi
 
-# Log de pacotes bloqueados antes de descartá-los
-iptables -A INPUT -m set --match-set "$IPSET_BLOCKLIST_NAME" src -j LOG --log-prefix 'BLOCKED: ' --log-level 4
-
 # Adiciona a regra para descartar os pacotes provenientes dos IPs na blocklist
 iptables -A INPUT -m set --match-set "$IPSET_BLOCKLIST_NAME" src -j DROP
 
