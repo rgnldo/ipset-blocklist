@@ -4,29 +4,35 @@
 # Uso: update-blocklist.sh <arquivo de configuração>
 
 # Função para verificar se um comando existe
-function exists() { command -v "$1" >/dev/null 2>&1 ; }
+function exists() { type -P "$1" >/dev/null 2>&1 ; }
+
+# Função para exibir mensagens de erro
+function log_error() { echo >&2 "Erro: $1"; }
+
+# Função para exibir mensagens informativas
+function log_info() { echo "$1"; }
 
 # Verifica se um arquivo de configuração foi fornecido
 if [[ -z "$1" ]]; then
-  echo "Erro: por favor, especifique um arquivo de configuração, por exemplo: $0 /opt/ipset-blocklist/ipset-blocklist.conf"
+  log_error "Por favor, especifique um arquivo de configuração, por exemplo: $0 /opt/ipset-blocklist/ipset-blocklist.conf"
   exit 1
 fi
 
 # Carrega o arquivo de configuração
 if ! source "$1"; then
-  echo "Erro: não foi possível carregar o arquivo de configuração $1"
+  log_error "Não foi possível carregar o arquivo de configuração $1"
   exit 1
 fi
 
 # Verifica se todas as dependências estão instaladas
 for cmd in curl egrep grep ipset iptables sed sort wc; do
   if ! exists "$cmd"; then
-    echo >&2 "Erro: o comando $cmd não foi encontrado no sistema."
+    log_error "O comando $cmd não foi encontrado no sistema."
     exit 1
   fi
 done
 
-# Define se será feita a otimização CIDR (se o iprange estiver disponível)
+# Define se será feita a otimização CIDR
 DO_OPTIMIZE_CIDR=no
 if exists iprange && [[ ${OPTIMIZE_CIDR:-yes} != no ]]; then
   DO_OPTIMIZE_CIDR=yes
@@ -34,42 +40,42 @@ fi
 
 # Verifica se os diretórios para os arquivos de blocklist existem
 if [[ ! -d $(dirname "$IP_BLOCKLIST") || ! -d $(dirname "$IP_BLOCKLIST_RESTORE") ]]; then
-  echo >&2 "Erro: diretório(s) ausente(s): $(dirname "$IP_BLOCKLIST" "$IP_BLOCKLIST_RESTORE" | sort -u)"
+  log_error "Diretório(s) ausente(s): $(dirname "$IP_BLOCKLIST" "$IP_BLOCKLIST_RESTORE" | sort -u)"
   exit 1
 fi
 
 # Remove o ipset existente antes de criar um novo
 if ipset list -n | grep -q "$IPSET_BLOCKLIST_NAME"; then
-  echo "Removendo o ipset existente: $IPSET_BLOCKLIST_NAME"
+  log_info "Removendo o ipset existente: $IPSET_BLOCKLIST_NAME"
   
   # Remove as regras do iptables que usam o ipset
   iptables-save | grep -E "match-set $IPSET_BLOCKLIST_NAME" | while read -r rule; do
-    iptables -D INPUT "$(echo "$rule" | awk '{print $1}')" || echo >&2 "Erro: não foi possível remover a regra do iptables."
+    iptables -D INPUT "$(echo "$rule" | awk '{print $1}')" || log_error "Não foi possível remover a regra do iptables."
   done
   
   # Destrói o ipset
   if ! ipset destroy "$IPSET_BLOCKLIST_NAME"; then
-    echo >&2 "Erro: não foi possível destruir o ipset '$IPSET_BLOCKLIST_NAME'."
+    log_error "Não foi possível destruir o ipset '$IPSET_BLOCKLIST_NAME'."
     exit 1
   fi
 fi
 
 # Cria um novo ipset
 if ! ipset create "$IPSET_BLOCKLIST_NAME" hash:net family inet hashsize "${HASHSIZE:-16384}" maxelem "${MAXELEM:-65536}"; then
-  echo >&2 "Erro: ao criar o ipset inicial"
+  log_error "Erro ao criar o ipset inicial"
   exit 1
 fi
 
 # Verifica se a regra do iptables para o ipset já existe
 if ! iptables -nvL INPUT | grep -q "match-set $IPSET_BLOCKLIST_NAME"; then
   if [[ ${FORCE:-no} != yes ]]; then
-    echo >&2 "Erro: a regra do iptables para o ipset '$IPSET_BLOCKLIST_NAME' está ausente."
-    echo >&2 "Adicione a regra manualmente usando o comando:"
-    echo >&2 "# iptables -I INPUT ${IPTABLES_IPSET_RULE_NUMBER:-1} -m set --match-set $IPSET_BLOCKLIST_NAME src -j DROP"
+    log_error "A regra do iptables para o ipset '$IPSET_BLOCKLIST_NAME' está ausente."
+    log_error "Adicione a regra manualmente usando o comando:"
+    log_error "# iptables -I INPUT ${IPTABLES_IPSET_RULE_NUMBER:-1} -m set --match-set $IPSET_BLOCKLIST_NAME src -j DROP"
     exit 1
   fi
   if ! iptables -I INPUT "${IPTABLES_IPSET_RULE_NUMBER:-1}" -m set --match-set "$IPSET_BLOCKLIST_NAME" src -j DROP; then
-    echo >&2 "Erro: falha ao adicionar a regra do ipset ao iptables."
+    log_error "Falha ao adicionar a regra do ipset ao iptables."
     exit 1
   fi
 fi
@@ -85,9 +91,9 @@ for url in "${BLOCKLISTS[@]}"; do
     sed -r 's/^0*([0-9]+)\.0*([0-9]+)\.0*([0-9]+)\.0*([0-9]+)$/\1.\2.\3.\4/' >> "$IP_BLOCKLIST_TMP"
     [[ ${VERBOSE:-yes} == yes ]] && echo -n "."
   elif [[ $HTTP_RC == 503 ]]; then
-    echo -e "\\nIndisponível (${HTTP_RC}): $url"
+    log_info "Indisponível (${HTTP_RC}): $url"
   else
-    echo >&2 -e "\\nAviso: o curl retornou o código de resposta HTTP $HTTP_RC para a URL $url"
+    log_error "Aviso: o curl retornou o código de resposta HTTP $HTTP_RC para a URL $url"
   fi
   rm -f "$IP_TMP"
 done
@@ -98,10 +104,10 @@ sort -n | sort -mu >| "$IP_BLOCKLIST"
 
 # Otimização CIDR, se ativada
 if [[ $DO_OPTIMIZE_CIDR == yes ]]; then
-  [[ ${VERBOSE:-no} == yes ]] && echo -e "\\nEndereços antes da otimização CIDR: $(wc -l < "$IP_BLOCKLIST")"
+  [[ ${VERBOSE:-no} == yes ]] && log_info "Endereços antes da otimização CIDR: $(wc -l < "$IP_BLOCKLIST")"
   
   iprange --optimize < "$IP_BLOCKLIST" > "$IP_BLOCKLIST_TMP" 2>/dev/null
-  [[ ${VERBOSE:-no} == yes ]] && echo "Endereços após a otimização CIDR: $(wc -l < "$IP_BLOCKLIST_TMP")"
+  [[ ${VERBOSE:-no} == yes ]] && log_info "Endereços após a otimização CIDR: $(wc -l < "$IP_BLOCKLIST_TMP")"
   
   cp "$IP_BLOCKLIST_TMP" "$IP_BLOCKLIST"
 fi
@@ -129,6 +135,12 @@ ipset restore -file "$IP_BLOCKLIST_RESTORE"
 
 # Exibe o resultado, se verbose estiver ativado
 if [[ ${VERBOSE:-no} == yes ]]; then
-  echo
-  echo "Endereços IP adicionados à blocklist: $(wc -l < "$IP_BLOCKLIST")"
+  log_info
+  log_info "Endereços IP adicionados à blocklist: $(wc -l < "$IP_BLOCKLIST")"
 fi
+
+# Limpeza final
+rm -f "$IP_BLOCKLIST_RESTORE"
+
+# Mensagem de sucesso
+log_info "Blocklist atualizada com sucesso."
