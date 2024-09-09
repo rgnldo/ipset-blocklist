@@ -41,11 +41,21 @@ fi
 # Remove o ipset existente antes de criar um novo
 if ipset list -n | grep -q "$IPSET_BLOCKLIST_NAME"; then
   echo "Removendo o ipset existente: $IPSET_BLOCKLIST_NAME"
-  ipset destroy "$IPSET_BLOCKLIST_NAME"
+  
+  # Remove as regras do iptables que usam o ipset
+  iptables-save | grep -E "match-set $IPSET_BLOCKLIST_NAME" | while read -r rule; do
+    iptables -D INPUT "$(echo "$rule" | awk '{print $1}')" || echo >&2 "Erro: não foi possível remover a regra do iptables."
+  done
+  
+  # Destrói o ipset
+  if ! ipset destroy "$IPSET_BLOCKLIST_NAME"; then
+    echo >&2 "Erro: não foi possível destruir o ipset '$IPSET_BLOCKLIST_NAME'."
+    exit 1
+  fi
 fi
 
 # Cria um novo ipset
-if ! ipset create "$IPSET_BLOCKLIST_NAME" -exist hash:net family inet hashsize "${HASHSIZE:-16384}" maxelem "${MAXELEM:-65536}"; then
+if ! ipset create "$IPSET_BLOCKLIST_NAME" hash:net family inet hashsize "${HASHSIZE:-16384}" maxelem "${MAXELEM:-65536}"; then
   echo >&2 "Erro: ao criar o ipset inicial"
   exit 1
 fi
