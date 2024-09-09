@@ -59,7 +59,6 @@ install_ipset_blocklist() {
 
     # Configurar iptables regras
     ipset restore < /opt/ipset-blocklist/ip-blocklist.restore
-    #iptables -I INPUT 1 -m set --match-set blocklist src -j DROP
     
     # Criar o arquivo de serviço systemd
     cat <<EOF > /etc/systemd/system/ipset-blocklist.service
@@ -120,6 +119,17 @@ uninstall_ipset_blocklist() {
 
     # Recarregar o systemd
     systemctl daemon-reload
+
+    # Remover ipsets e regras iptables
+    if ipset list -n | grep -q 'blocklist'; then
+        echo "Removendo o ipset 'blocklist'"
+        ipset destroy blocklist || echo "Erro ao destruir o ipset 'blocklist'"
+    fi
+
+    # Remover regras do iptables associadas ao ipset
+    iptables-save | grep -E "match-set blocklist" | while read -r rule; do
+        iptables -D INPUT "$(echo "$rule" | awk '{print $1}')" || echo "Erro ao remover regra do iptables."
+    done
 
     echo "Desinstalação concluída com sucesso."
 }
