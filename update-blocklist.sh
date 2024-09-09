@@ -26,11 +26,11 @@ if exists iprange && [[ ${OPTIMIZE_CIDR:-yes} != no ]]; then
 fi
 
 if [[ ! -d $(dirname "$IP_BLOCKLIST") || ! -d $(dirname "$IP_BLOCKLIST_RESTORE") ]]; then
-  echo >&2 "Error: missing directory(s): $(dirname "$IP_BLOCKLIST" "$IP_BLOCKLIST_RESTORE"|sort -u)"
+  echo >&2 "Error: missing directory(s): $(dirname "$IP_BLOCKLIST" "$IP_BLOCKLIST_RESTORE" | sort -u)"
   exit 1
 fi
 
-# create the ipset if needed (or abort if does not exist and FORCE=no)
+# Create ipset if it doesn't exist
 if ! ipset list -n | grep -q "^$IPSET_BLOCKLIST_NAME$"; then
   if [[ ${FORCE:-no} != yes ]]; then
     echo >&2 "Error: ipset does not exist yet, add it using:"
@@ -43,7 +43,7 @@ if ! ipset list -n | grep -q "^$IPSET_BLOCKLIST_NAME$"; then
   fi
 fi
 
-# Check if the iptables rule is present (or abort if not and FORCE=no)
+# Check if iptables rule is present
 if ! iptables -nvL INPUT | grep -q "match-set $IPSET_BLOCKLIST_NAME"; then
   if [[ ${FORCE:-no} != yes ]]; then
     echo >&2 "Error: iptables rule for ipset '$IPSET_BLOCKLIST_NAME' is missing."
@@ -64,8 +64,9 @@ IP_BLOCKLIST_TMP=$(mktemp)
 for i in "${BLOCKLISTS[@]}"
 do
   IP_TMP=$(mktemp)
-  HTTP_RC=$(curl -L -A "blocklist-update/script/github" --connect-timeout 10 --max-time 10 -o "$IP_TMP" -s -w "%{http_code}" "$i")
+  HTTP_RC=$(curl -L -A "blocklist-update/script/github" --connect-timeout 10 --max-time 30 -o "$IP_TMP" -s -w "%{http_code}" "$i")
   if [[ "$HTTP_RC" -eq 200 || "$HTTP_RC" -eq 302 || "$HTTP_RC" -eq 0 ]]; then
+    echo "Processing: $i"
     grep -Po '^(?:\d{1,3}\.){3}\d{1,3}(?:/\d{1,2})?' "$IP_TMP" | sed -r 's/^0*([0-9]+)\.0*([0-9]+)\.0*([0-9]+)\.0*([0-9]+)$/\1.\2.\3.\4/' >> "$IP_BLOCKLIST_TMP"
     [[ ${VERBOSE:-yes} == yes ]] && echo -n "."
   elif [[ "$HTTP_RC" -eq 503 ]]; then
@@ -78,6 +79,7 @@ done
 
 # Remove private IPs and sort unique IPs
 sed -r -e '/^(0\.0\.0\.0|10\.|127\.|172\.1[6-9]\.|172\.2[0-9]\.|172\.3[0-1]\.|192\.168\.|22[4-9]\.|23[0-9]\.)/d' "$IP_BLOCKLIST_TMP" | sort -n | sort -mu > "$IP_BLOCKLIST"
+
 if [[ ${DO_OPTIMIZE_CIDR} == yes ]]; then
   if [[ ${VERBOSE:-no} == yes ]]; then
     echo -e "\\nAddresses before CIDR optimization: $(wc -l < "$IP_BLOCKLIST")"
@@ -106,7 +108,10 @@ destroy $IPSET_TMP_BLOCKLIST_NAME
 EOF
 
 # Restore ipset from file
-ipset -file "$IP_BLOCKLIST_RESTORE" restore
+if ! ipset -file "$IP_BLOCKLIST_RESTORE" restore; then
+  echo >&2 "Error: Failed to restore ipset from file."
+  exit 1
+fi
 
 if [[ ${VERBOSE:-no} == yes ]]; then
   echo
