@@ -27,7 +27,7 @@ install_ipset_blocklist() {
 
     # Configurar iptables regras
     ipset restore < /opt/ipset-blocklist/ip-blocklist.restore
-    iptables -I INPUT 1 -m set --match-set blocklist src -j DROP
+    #iptables -I INPUT 1 -m set --match-set blocklist src -j DROP
     
     # Criar o arquivo de serviço systemd
     cat <<EOF > /etc/systemd/system/ipset-blocklist.service
