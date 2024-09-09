@@ -1,49 +1,17 @@
 #!/bin/bash
 
-# Função para instalar pacotes ausentes
-install_missing_packages() {
-    # Verificar se o ipset e o wget estão instalados e instalar se estiverem ausentes
-    MISSING_PACKAGES=()
-
+# Função para instalar o IPSet Blocklist
+install_ipset_blocklist() {
+    # Verificar se o ipset e o wget estão instalados
     if ! command -v ipset &> /dev/null; then
-        MISSING_PACKAGES+=("ipset")
+        echo "O ipset não está instalado. Instale-o antes de prosseguir."
+        exit 1
     fi
 
     if ! command -v wget &> /dev/null; then
-        MISSING_PACKAGES+=("wget")
+        echo "O wget não está instalado. Instale-o antes de prosseguir."
+        exit 1
     fi
-
-    if [ ${#MISSING_PACKAGES[@]} -gt 0 ]; then
-        echo "Os seguintes pacotes estão faltando: ${MISSING_PACKAGES[*]}"
-        read -p "Deseja instalar os pacotes necessários? (S/n): " install_choice
-
-        if [[ "$install_choice" =~ ^[Ss]$ || -z "$install_choice" ]]; then
-            if command -v apt &> /dev/null; then
-                sudo apt update
-                sudo apt install -y "${MISSING_PACKAGES[@]}"
-            elif command -v yum &> /dev/null; then
-                sudo yum install -y "${MISSING_PACKAGES[@]}"
-            elif command -v dnf &> /dev/null; then
-                sudo dnf install -y "${MISSING_PACKAGES[@]}"
-            elif command -v pacman &> /dev/null; then
-                sudo pacman -S --noconfirm "${MISSING_PACKAGES[@]}"
-            else
-                echo "Erro: gerenciador de pacotes não suportado. Instale os pacotes manualmente."
-                exit 1
-            fi
-        else
-            echo "Instalação cancelada."
-            exit 1
-        fi
-    else
-        echo "Todos os pacotes necessários já estão instalados."
-    fi
-}
-
-# Função para instalar o IPSet Blocklist
-install_ipset_blocklist() {
-    # Verificar e instalar pacotes ausentes
-    install_missing_packages
 
     # Criar diretórios
     mkdir -p /opt/ipset-blocklist
@@ -59,6 +27,7 @@ install_ipset_blocklist() {
 
     # Configurar iptables regras
     ipset restore < /opt/ipset-blocklist/ip-blocklist.restore
+    iptables -I INPUT 1 -m set --match-set blocklist src -j DROP
     
     # Criar o arquivo de serviço systemd
     cat <<EOF > /etc/systemd/system/ipset-blocklist.service
@@ -97,7 +66,8 @@ EOF
     # Habilitar o temporizador e o serviço para iniciar após o boot
     systemctl enable ipset-blocklist.timer
     systemctl enable ipset-blocklist.service
-    systemctl start ipset-blocklist.timer
+    systemctl daemon-reload
+    systemctl start ipset-blocklist.time
     systemctl start ipset-blocklist.service
 
     echo "Instalação concluída com sucesso."
@@ -116,20 +86,6 @@ uninstall_ipset_blocklist() {
     rm -rf /opt/ipset-blocklist
     rm -f /etc/systemd/system/ipset-blocklist.service
     rm -f /etc/systemd/system/ipset-blocklist.timer
-
-    # Recarregar o systemd
-    systemctl daemon-reload
-
-    # Remover ipsets e regras iptables
-    if ipset list -n | grep -q 'blocklist'; then
-        echo "Removendo o ipset 'blocklist'"
-        ipset destroy blocklist || echo "Erro ao destruir o ipset 'blocklist'"
-    fi
-
-    # Remover regras do iptables associadas ao ipset
-    iptables-save | grep -E "match-set blocklist" | while read -r rule; do
-        iptables -D INPUT "$(echo "$rule" | awk '{print $1}')" || echo "Erro ao remover regra do iptables."
-    done
 
     echo "Desinstalação concluída com sucesso."
 }
