@@ -1,17 +1,23 @@
 #!/bin/bash
 
-# Função para instalar o IPSet Blocklist
-install_ipset_blocklist() {
-    # Verificar se o ipset e o wget estão instalados
+# Função para instalar pacotes necessários
+install_missing_packages() {
+    # Verificar se o ipset e o wget estão instalados e instalar se necessário
     if ! command -v ipset &> /dev/null; then
-        echo "O ipset não está instalado. Instale-o antes de prosseguir."
-        exit 1
+        echo "Instalando ipset..."
+        apt-get update && apt-get install -y ipset || { echo "Falha ao instalar ipset."; exit 1; }
     fi
 
     if ! command -v wget &> /dev/null; then
-        echo "O wget não está instalado. Instale-o antes de prosseguir."
-        exit 1
+        echo "Instalando wget..."
+        apt-get update && apt-get install -y wget || { echo "Falha ao instalar wget."; exit 1; }
     fi
+}
+
+# Função para instalar o IPSet Blocklist
+install_ipset_blocklist() {
+    # Instalar pacotes necessários
+    install_missing_packages
 
     # Criar diretórios
     mkdir -p /opt/ipset-blocklist
@@ -66,8 +72,7 @@ EOF
     # Habilitar o temporizador e o serviço para iniciar após o boot
     systemctl enable ipset-blocklist.timer
     systemctl enable ipset-blocklist.service
-    systemctl daemon-reload
-    systemctl start ipset-blocklist.time
+    systemctl start ipset-blocklist.timer
     systemctl start ipset-blocklist.service
 
     echo "Instalação concluída com sucesso."
@@ -80,6 +85,10 @@ uninstall_ipset_blocklist() {
     systemctl disable ipset-blocklist.service
     systemctl stop ipset-blocklist.timer
     systemctl disable ipset-blocklist.timer
+
+    # Remover regras do iptables e ipset
+    iptables -D INPUT -m set --match-set blocklist src -j DROP
+    ipset destroy blocklist
 
     # Remover arquivos e diretórios
     rm -rf /usr/local/sbin/update-blocklist.sh
