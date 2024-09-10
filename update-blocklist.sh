@@ -19,8 +19,8 @@ if ! source "$1"; then
 fi
 
 # Verifica se os comandos essenciais estão disponíveis
-if ! exists curl || ! exists egrep || ! exists grep || ! exists ipset || ! exists iptables || ! exists sed || ! exists sort || ! exists wc ; then
-  echo >&2 "Erro: faltam executáveis: curl egrep grep ipset iptables sed sort wc"
+if ! exists curl || ! exists grep || ! exists ipset || ! exists iptables || ! exists sed || ! exists sort || ! exists wc ; then
+  echo >&2 "Erro: faltam executáveis: curl grep ipset iptables sed sort wc"
   exit 1
 fi
 
@@ -46,32 +46,36 @@ if ! ipset list -n | grep -q "$IPSET_BLOCKLIST_NAME"; then
   ipset create "$IPSET_BLOCKLIST_NAME" -exist hash:net family inet hashsize "${HASHSIZE:-16384}" maxelem "${MAXELEM:-65536}"
 fi
 
-# Criação da chain iptables se não existir
-if ! iptables -nvL INPUT | grep -q "match-set $IPSET_BLOCKLIST_NAME"; then
+# Criação da chain BLOCKLIST no iptables se não existir
+if ! iptables -L BLOCKLIST -n >/dev/null 2>&1; then
   if [[ ${FORCE:-no} != yes ]]; then
-    echo >&2 "Erro: iptables não contém a regra necessária, adicione usando:"
-    echo >&2 "# iptables -I INPUT ${IPTABLES_IPSET_RULE_NUMBER:-1} -m set --match-set $IPSET_BLOCKLIST_NAME src -j DROP"
+    echo >&2 "Erro: a chain BLOCKLIST não existe, adicione usando:"
+    echo >&2 "# iptables -N BLOCKLIST"
     exit 1
   fi
-  # Adiciona regra para LOG antes do DROP
-  iptables -I INPUT "${IPTABLES_IPSET_RULE_NUMBER:-1}" -m set --match-set "$IPSET_BLOCKLIST_NAME" src -j LOG --log-prefix "IP Blocked: "
-  iptables -I INPUT "${IPTABLES_IPSET_RULE_NUMBER:-2}" -m set --match-set "$IPSET_BLOCKLIST_NAME" src -j DROP
+  iptables -N BLOCKLIST
+  iptables -A BLOCKLIST -m set --match-set "$IPSET_BLOCKLIST_NAME" src -j DROP
+fi
+
+# Adiciona a chain BLOCKLIST à chain INPUT se não estiver presente
+if ! iptables -L INPUT -n | grep -q "BLOCKLIST"; then
+  if [[ ${FORCE:-no} != yes ]]; then
+    echo >&2 "Erro: a chain BLOCKLIST não está na chain INPUT, adicione usando:"
+    echo >&2 "# iptables -I INPUT ${IPTABLES_IPSET_RULE_NUMBER:-1} -j BLOCKLIST"
+    exit 1
+  fi
+  iptables -I INPUT "${IPTABLES_IPSET_RULE_NUMBER:-1}" -j BLOCKLIST
 fi
 
 # Processamento dos blocklists
 IP_BLOCKLIST_TMP=$(mktemp)
-for i in "${BLOCKLISTS[@]}"; do
-  IP_TMP=$(mktemp)
-  (( HTTP_RC=$(curl -L -A "blocklist-update/script/github" --connect-timeout 10 --max-time 10 -o "$IP_TMP" -s -w "%{http_code}" "$i") ))
-  if (( HTTP_RC == 200 || HTTP_RC == 302 || HTTP_RC == 0 )); then
-    grep -Po '^(?:\d{1,3}\.){3}\d{1,3}(?:/\d{1,2})?' "$IP_TMP" | sed -r 's/^0*([0-9]+)\.0*([0-9]+)\.0*([0-9]+)\.0*([0-9]+)$/\1.\2.\3.\4/' >> "$IP_BLOCKLIST_TMP"
-    [[ ${VERBOSE:-yes} == yes ]] && echo -n "."
-  elif (( HTTP_RC == 503 )); then
-    echo -e "\\nIndisponível (${HTTP_RC}): $i"
+for url in "${BLOCKLISTS[@]}"; do
+  result=$(curl -s "$url")
+  if [ -n "$result" ]; then
+    echo "$result" | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}(/[0-9]{1,2})?' >> "$IP_BLOCKLIST_TMP"
   else
-    echo >&2 -e "\\nAviso: curl retornou código HTTP $HTTP_RC para URL $i"
+    echo "Sem resultado de: $url"
   fi
-  rm -f "$IP_TMP"
 done
 
 # Elimina IPs locais, ordena e otimiza CIDR
