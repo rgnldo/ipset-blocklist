@@ -6,6 +6,22 @@
 # Função para verificar se o comando existe
 function exists() { command -v "$1" >/dev/null 2>&1 ; }
 
+# Função para validar IP/CIDR
+function validate_ip() {
+  # Valida IPs ou CIDRs válidos
+  if [[ ! "$1" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}(/([0-9]|[1-2][0-9]|3[0-2]))?$ ]]; then
+    return 1  # IP inválido
+  fi
+  # Validando se os octetos do IP estão no intervalo correto (0-255)
+  IFS='.' read -r -a octets <<< "$1"
+  for octet in "${octets[@]}"; do
+    if [[ "$octet" -gt 255 || "$octet" -lt 0 ]]; then
+      return 1  # IP inválido
+    fi
+  done
+  return 0  # IP válido
+}
+
 # Verificação do arquivo de configuração
 if [[ -z "$1" ]]; then
   echo "Erro: por favor, especifique um arquivo de configuração, ex: $0 /opt/ipset-blocklist/ipset-blocklist.conf"
@@ -24,12 +40,6 @@ if ! exists curl || ! exists grep || ! exists ipset || ! exists iptables || ! ex
   exit 1
 fi
 
-# Define se otimizaremos CIDR (blocos de IP)
-DO_OPTIMIZE_CIDR=no
-if exists iprange && [[ ${OPTIMIZE_CIDR:-yes} != no ]]; then
-  DO_OPTIMIZE_CIDR=yes
-fi
-
 # Verificação dos diretórios
 if [[ ! -d $(dirname "$IP_BLOCKLIST") || ! -d $(dirname "$IP_BLOCKLIST_RESTORE") ]]; then
   echo >&2 "Erro: diretório(s) faltando: $(dirname "$IP_BLOCKLIST" "$IP_BLOCKLIST_RESTORE"|sort -u)"
@@ -38,55 +48,55 @@ fi
 
 # Criação do ipset se ele não existir
 if ! ipset list -n | grep -q "$IPSET_BLOCKLIST_NAME"; then
-  if [[ ${FORCE:-no} != yes ]]; then
-    echo >&2 "Erro: o ipset ainda não existe, crie usando:"
-    echo >&2 "# ipset create $IPSET_BLOCKLIST_NAME -exist hash:net family inet hashsize ${HASHSIZE:-16384} maxelem ${MAXELEM:-65536}"
-    exit 1
-  fi
   ipset create "$IPSET_BLOCKLIST_NAME" -exist hash:net family inet hashsize "${HASHSIZE:-16384}" maxelem "${MAXELEM:-65536}"
 fi
 
 # Criação da chain BLOCKLIST no iptables se não existir
 if ! iptables -L BLOCKLIST -n >/dev/null 2>&1; then
-  if [[ ${FORCE:-no} != yes ]]; then
-    echo >&2 "Erro: a chain BLOCKLIST não existe, adicione usando:"
-    echo >&2 "# iptables -N BLOCKLIST"
-    exit 1
-  fi
   iptables -N BLOCKLIST
   iptables -A BLOCKLIST -m set --match-set "$IPSET_BLOCKLIST_NAME" src -j DROP
 fi
 
 # Adiciona a chain BLOCKLIST à chain INPUT se não estiver presente
 if ! iptables -L INPUT -n | grep -q "BLOCKLIST"; then
-  if [[ ${FORCE:-no} != yes ]]; then
-    echo >&2 "Erro: a chain BLOCKLIST não está na chain INPUT, adicione usando:"
-    echo >&2 "# iptables -I INPUT ${IPTABLES_IPSET_RULE_NUMBER:-1} -j BLOCKLIST"
-    exit 1
-  fi
   iptables -I INPUT "${IPTABLES_IPSET_RULE_NUMBER:-1}" -j BLOCKLIST
 fi
 
 # Processamento dos blocklists
 IP_BLOCKLIST_TMP=$(mktemp)
+invalid_ip_count=0
+valid_ip_count=0
+
 for url in "${BLOCKLISTS[@]}"; do
   result=$(curl -s "$url")
   if [ -n "$result" ]; then
-    echo "$result" | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}(/[0-9]{1,2})?' >> "$IP_BLOCKLIST_TMP"
+    while read -r ip; do
+      # Valida o IP
+      if ! validate_ip "$ip"; then
+        invalid_ip_count=$((invalid_ip_count + 1))
+        continue  # Ignora o IP inválido
+      fi
+      echo "$ip" >> "$IP_BLOCKLIST_TMP"
+      valid_ip_count=$((valid_ip_count + 1))
+    done <<< "$(echo "$result" | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}(/[0-9]{1,2})?')"
   else
     echo "Sem resultado de: $url"
   fi
 done
 
+# Relatório de IPs inválidos e válidos
+echo "IPs inválidos descartados: $invalid_ip_count"
+echo "IPs válidos processados: $valid_ip_count"
+
+# Se não houver IPs válidos, aborta
+if [[ "$valid_ip_count" -eq 0 ]]; then
+  echo "Erro: nenhum IP válido encontrado. Abortando."
+  rm -f "$IP_BLOCKLIST_TMP"
+  exit 1
+fi
+
 # Elimina IPs locais, ordena e otimiza CIDR
 sed -r -e '/^(0\.0\.0\.0|10\.|127\.|172\.1[6-9]\.|172\.2[0-9]\.|172\.3[0-1]\.|192\.168\.|22[4-9]\.|23[0-9]\.)/d' "$IP_BLOCKLIST_TMP" | sort -n | sort -mu >| "$IP_BLOCKLIST"
-
-if [[ $DO_OPTIMIZE_CIDR == yes ]]; then
-  [[ ${VERBOSE:-no} == yes ]] && echo -e "\\nEndereços antes da otimização CIDR: $(wc -l "$IP_BLOCKLIST" | cut -d' ' -f1)"
-  < "$IP_BLOCKLIST" iprange --optimize - > "$IP_BLOCKLIST_TMP" 2>/dev/null
-  [[ ${VERBOSE:-no} == yes ]] && echo "Endereços após a otimização CIDR: $(wc -l "$IP_BLOCKLIST_TMP" | cut -d' ' -f1)"
-  cp "$IP_BLOCKLIST_TMP" "$IP_BLOCKLIST"
-fi
 
 rm -f "$IP_BLOCKLIST_TMP"
 
@@ -107,4 +117,4 @@ EOF
 ipset -file "$IP_BLOCKLIST_RESTORE" restore
 
 # Relatório final
-[[ ${VERBOSE:-no} == yes ]] && echo "Endereços IP bloqueados: $(wc -l "$IP_BLOCKLIST" | cut -d' ' -f1)"
+echo "Endereços IP bloqueados: $(wc -l "$IP_BLOCKLIST" | cut -d' ' -f1)"
