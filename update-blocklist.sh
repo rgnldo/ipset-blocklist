@@ -51,18 +51,18 @@ if ! ipset list -n | grep -q "$IPSET_BLOCKLIST_NAME"; then
   ipset create "$IPSET_BLOCKLIST_NAME" -exist hash:net family inet hashsize "${HASHSIZE:-16384}" maxelem "${MAXELEM:-65536}"
 fi
 
-# Adiciona a regra iptables se ela não existir
-if ! iptables -nvL INPUT | command grep -q "match-set $IPSET_BLOCKLIST_NAME"; then
-  # Podemos assumir que a regra INPUT n° 1 é sobre monitoramento de tráfego
-  if [[ ${FORCE:-no} != yes ]]; then
-    echo >&2 "Error: iptables does not have the needed ipset INPUT rule, add it using:"
-    echo >&2 "# iptables -I INPUT ${IPTABLES_IPSET_RULE_NUMBER:-1} -m set --match-set $IPSET_BLOCKLIST_NAME src -j DROP"
-    exit 1
+# Pergunta ao usuário se deseja realizar o flush do ipset
+read -p "Deseja limpar a lista do ipset ($IPSET_BLOCKLIST_NAME) antes de adicionar novos IPs? (s/n): " flush_response
+if [[ "$flush_response" =~ ^[sS]$ ]]; then
+  # Realiza o flush antes de adicionar os IPs
+  if ipset list "$IPSET_BLOCKLIST_NAME" >/dev/null 2>&1; then
+    echo "Realizando flush da lista do ipset..."
+    ipset flush "$IPSET_BLOCKLIST_NAME"
+  else
+    echo "Aviso: ipset não encontrado. Criando nova lista."
   fi
-  if ! iptables -I INPUT "${IPTABLES_IPSET_RULE_NUMBER:-1}" -m set --match-set "$IPSET_BLOCKLIST_NAME" src -j DROP; then
-    echo >&2 "Error: while adding the --match-set ipset rule to iptables"
-    exit 1
-  fi
+else
+  echo "A lista do ipset não será limpa. Prosseguindo com a atualização."
 fi
 
 # Processamento dos blocklists
@@ -71,6 +71,7 @@ invalid_ip_count=0
 valid_ip_count=0
 
 for url in "${BLOCKLISTS[@]}"; do
+  echo "Processando blocklist: $url"
   result=$(curl -s "$url")
   if [ -n "$result" ]; then
     while read -r ip; do
@@ -99,6 +100,7 @@ if [[ "$valid_ip_count" -eq 0 ]]; then
 fi
 
 # Elimina IPs locais, ordena e otimiza CIDR
+echo "Filtrando e otimizando os IPs..."
 sed -r -e '/^(0\.0\.0\.0|10\.|127\.|172\.1[6-9]\.|172\.2[0-9]\.|172\.3[0-1]\.|192\.168\.|22[4-9]\.|23[0-9]\.)/d' "$IP_BLOCKLIST_TMP" | sort -n | sort -mu >| "$IP_BLOCKLIST"
 
 rm -f "$IP_BLOCKLIST_TMP"
@@ -109,13 +111,6 @@ create $IPSET_TMP_BLOCKLIST_NAME -exist hash:net family inet hashsize ${HASHSIZE
 create $IPSET_BLOCKLIST_NAME -exist hash:net family inet hashsize ${HASHSIZE:-16384} maxelem ${MAXELEM:-65536}
 EOF
 
-# Antes de restaurar a lista, faz o flush
-if ipset list "$IPSET_BLOCKLIST_NAME" >/dev/null 2>&1; then
-  ipset flush "$IPSET_BLOCKLIST_NAME"
-else
-  echo "Aviso: ipset não encontrado. Criando nova lista."
-fi
-
 # Processamento final do blocklist
 sed -rn -e '/^#|^$/d' -e "s/^([0-9./]+).*/add $IPSET_TMP_BLOCKLIST_NAME \\1/p" "$IP_BLOCKLIST" >> "$IP_BLOCKLIST_RESTORE"
 
@@ -124,6 +119,8 @@ swap $IPSET_BLOCKLIST_NAME $IPSET_TMP_BLOCKLIST_NAME
 destroy $IPSET_TMP_BLOCKLIST_NAME
 EOF
 
+# Restaura o ipset
+echo "Atualizando a lista do ipset..."
 ipset -file "$IP_BLOCKLIST_RESTORE" restore
 
 # Relatório final
