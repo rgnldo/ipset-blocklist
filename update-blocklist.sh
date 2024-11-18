@@ -48,21 +48,16 @@ fi
 
 # Criação do ipset se ele não existir
 if ! ipset list -n | grep -q "$IPSET_BLOCKLIST_NAME"; then
+  echo "Criando ipset $IPSET_BLOCKLIST_NAME"
   ipset create "$IPSET_BLOCKLIST_NAME" -exist hash:net family inet hashsize "${HASHSIZE:-16384}" maxelem "${MAXELEM:-65536}"
 fi
 
-# Pergunta ao usuário se deseja realizar o flush do ipset
-read -p "Deseja limpar a lista do ipset ($IPSET_BLOCKLIST_NAME) antes de adicionar novos IPs? (s/n): " flush_response
-if [[ "$flush_response" =~ ^[sS]$ ]]; then
-  # Realiza o flush antes de adicionar os IPs
-  if ipset list "$IPSET_BLOCKLIST_NAME" >/dev/null 2>&1; then
-    echo "Realizando flush da lista do ipset..."
-    ipset flush "$IPSET_BLOCKLIST_NAME"
-  else
-    echo "Aviso: ipset não encontrado. Criando nova lista."
-  fi
+# Realiza o flush da lista do ipset
+echo "Realizando flush da lista do ipset $IPSET_BLOCKLIST_NAME"
+if ipset list "$IPSET_BLOCKLIST_NAME" >/dev/null 2>&1; then
+  ipset flush "$IPSET_BLOCKLIST_NAME"
 else
-  echo "A lista do ipset não será limpa. Prosseguindo com a atualização."
+  echo "Aviso: ipset não encontrado. Criando nova lista."
 fi
 
 # Processamento dos blocklists
