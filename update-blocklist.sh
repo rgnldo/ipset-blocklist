@@ -51,15 +51,18 @@ if ! ipset list -n | grep -q "$IPSET_BLOCKLIST_NAME"; then
   ipset create "$IPSET_BLOCKLIST_NAME" -exist hash:net family inet hashsize "${HASHSIZE:-16384}" maxelem "${MAXELEM:-65536}"
 fi
 
-# Criação da chain BLOCKLIST no iptables se não existir
-if ! iptables -L BLOCKLIST -n >/dev/null 2>&1; then
-  iptables -N BLOCKLIST
-  iptables -A BLOCKLIST -m set --match-set "$IPSET_BLOCKLIST_NAME" src -j DROP
-fi
-
-# Adiciona a chain BLOCKLIST à chain INPUT se não estiver presente
-if ! iptables -L INPUT -n | grep -q "BLOCKLIST"; then
-  iptables -I INPUT "${IPTABLES_IPSET_RULE_NUMBER:-1}" -j BLOCKLIST
+# Adiciona a regra iptables se ela não existir
+if ! iptables -nvL INPUT | command grep -q "match-set $IPSET_BLOCKLIST_NAME"; then
+  # Podemos assumir que a regra INPUT n° 1 é sobre monitoramento de tráfego
+  if [[ ${FORCE:-no} != yes ]]; then
+    echo >&2 "Error: iptables does not have the needed ipset INPUT rule, add it using:"
+    echo >&2 "# iptables -I INPUT ${IPTABLES_IPSET_RULE_NUMBER:-1} -m set --match-set $IPSET_BLOCKLIST_NAME src -j DROP"
+    exit 1
+  fi
+  if ! iptables -I INPUT "${IPTABLES_IPSET_RULE_NUMBER:-1}" -m set --match-set "$IPSET_BLOCKLIST_NAME" src -j DROP; then
+    echo >&2 "Error: while adding the --match-set ipset rule to iptables"
+    exit 1
+  fi
 fi
 
 # Processamento dos blocklists
