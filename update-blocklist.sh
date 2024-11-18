@@ -109,6 +109,13 @@ create $IPSET_TMP_BLOCKLIST_NAME -exist hash:net family inet hashsize ${HASHSIZE
 create $IPSET_BLOCKLIST_NAME -exist hash:net family inet hashsize ${HASHSIZE:-16384} maxelem ${MAXELEM:-65536}
 EOF
 
+# Antes de restaurar a lista, faz o flush
+if ipset list "$IPSET_BLOCKLIST_NAME" >/dev/null 2>&1; then
+  ipset flush "$IPSET_BLOCKLIST_NAME"
+else
+  echo "Aviso: ipset não encontrado. Criando nova lista."
+fi
+
 # Processamento final do blocklist
 sed -rn -e '/^#|^$/d' -e "s/^([0-9./]+).*/add $IPSET_TMP_BLOCKLIST_NAME \\1/p" "$IP_BLOCKLIST" >> "$IP_BLOCKLIST_RESTORE"
 
