@@ -53,17 +53,22 @@ if ! ipset list -n | grep -q "$IPSET_BLOCKLIST_NAME"; then
 fi
 
 # Adiciona a regra iptables se ela não existir
-if ! iptables -nvL INPUT | command grep -q "match-set $IPSET_BLOCKLIST_NAME"; then
-  # Podemos assumir que a regra INPUT n° 1 é sobre monitoramento de tráfego
+echo "Adiciona a regra iptables se ela não existir"
+# Verifica se a regra de iptables já existe
+if ! iptables -nvL INPUT | grep -q "match-set $IPSET_BLOCKLIST_NAME"; then
+  # Se a regra não existir, adicionar a regra ao INPUT
   if [[ ${FORCE:-no} != yes ]]; then
-    echo >&2 "Error: iptables does not have the needed ipset INPUT rule, add it using:"
+    echo >&2 "Atenção: A regra iptables com ipset não existe. Adicionando..."
     echo >&2 "# iptables -I INPUT ${IPTABLES_IPSET_RULE_NUMBER:-1} -m set --match-set $IPSET_BLOCKLIST_NAME src -j DROP"
-    exit 1
   fi
+
+  # Adiciona a regra no iptables
   if ! iptables -I INPUT "${IPTABLES_IPSET_RULE_NUMBER:-1}" -m set --match-set "$IPSET_BLOCKLIST_NAME" src -j DROP; then
-    echo >&2 "Error: while adding the --match-set ipset rule to iptables"
+    echo >&2 "Erro: Falha ao adicionar a regra --match-set ipset ao iptables."
     exit 1
   fi
+else
+  echo "A regra iptables já existe. Nenhuma alteração foi feita."
 fi
 
 # Realiza o flush da lista do ipset
