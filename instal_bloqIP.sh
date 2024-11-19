@@ -32,17 +32,18 @@ install_ipset_blocklist() {
     /usr/local/sbin/update-blocklist.sh /opt/ipset-blocklist/ipset-blocklist.conf
     
 
-    # Criar o arquivo do serviço systemd
-    cat <<EOF > /etc/systemd/system/ipset-blocklist.service
+# Criar o arquivo do serviço systemd
+cat <<EOF > /etc/systemd/system/ipset-blocklist.service
 [Unit]
-Description=IPSet Blocklist Service
+Description=IPSet Blocklist Service (executa uma única vez no boot)
 After=network-online.target
 
 [Service]
-Type=simple
-ExecStart=ipset restore < /opt/ipset-blocklist/ip-blocklist.restore
-Restart=always
-RestartSec=60
+Type=oneshot
+ExecStartPre=/usr/sbin/ipset flush blocklist
+ExecStart=/usr/sbin/ipset restore < /opt/ipset-blocklist/ip-blocklist.restore
+ExecStartPost=/usr/sbin/iptables -I INPUT -m set --match-set blocklist src -j DROP
+RemainAfterExit=no
 
 [Install]
 WantedBy=multi-user.target
