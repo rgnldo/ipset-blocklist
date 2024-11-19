@@ -30,12 +30,9 @@ install_ipset_blocklist() {
 
     # Gerar a lista em /opt/ipset-blocklist/ip-blocklist.restore
     /usr/local/sbin/update-blocklist.sh /opt/ipset-blocklist/ipset-blocklist.conf
-
-    # Configurar iptables regras
-    ipset restore < /opt/ipset-blocklist/ip-blocklist.restore
-    iptables -I INPUT 1 -m set --match-set blocklist src -j DROP
     
-    # Criar o arquivo de serviço systemd
+
+    # Criar o arquivo do serviço systemd
     cat <<EOF > /etc/systemd/system/ipset-blocklist.service
 [Unit]
 Description=IPSet Blocklist Service
@@ -43,7 +40,7 @@ After=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/sbin/update-blocklist.sh /opt/ipset-blocklist/ipset-blocklist.conf
+ExecStart=ipset restore < /opt/ipset-blocklist/ip-blocklist.restore
 Restart=always
 RestartSec=60
 
@@ -52,9 +49,9 @@ WantedBy=multi-user.target
 EOF
 
     # Criar o arquivo do temporizador systemd
-    cat <<EOF > /etc/systemd/system/ipset-blocklist.timer
+   cat <<EOF > /etc/systemd/system/ipset-blocklist.timer
 [Unit]
-Description=Agendador de 6 em 6 horas
+Description=Agendador de 6 em 6 horas para atualização do IPSet Blocklist
 
 [Timer]
 OnBootSec=5min
@@ -62,9 +59,13 @@ OnUnitActiveSec=6h
 AccuracySec=1s
 Persistent=true
 
+[Service]
+ExecStart=/usr/local/sbin/update-blocklist.sh /opt/ipset-blocklist/ipset-blocklist.conf
+
 [Install]
 WantedBy=timers.target
 EOF
+
 
     # Recarregar o systemd
     systemctl daemon-reload
@@ -87,7 +88,7 @@ uninstall_ipset_blocklist() {
     systemctl disable ipset-blocklist.timer
 
     # Remover regras do iptables e ipset
-    iptables -D INPUT -m set --match-set blocklist src -j DROP
+    iptables -D INPUT -m set --match-set blocklist  src -j DROP 2>/dev/null
     ipset destroy blocklist
 
     # Remover arquivos e diretórios
