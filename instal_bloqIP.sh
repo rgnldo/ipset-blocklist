@@ -31,17 +31,35 @@ install_ipset_blocklist() {
     # Gerar a lista inicial
     /usr/local/sbin/update-blocklist.sh /opt/ipset-blocklist/ipset-blocklist.conf
 
-    # Adicionar cron jobs
-    (crontab -l 2>/dev/null; echo "@reboot ipset restore < /opt/ipset-blocklist/ip-blocklist.restore && iptables -I INPUT -m set --match-set blocklist src -j DROP") | crontab -
-    (crontab -l 2>/dev/null; echo "0 */12 * * * /usr/local/sbin/update-blocklist.sh /opt/ipset-blocklist/ipset-blocklist.conf") | crontab -
+# Adicionar cron jobs
+echo "Configurando cron jobs para regras iptables e atualização de blocklist..."
 
-    echo "Instalação concluída com sucesso."
+# Cron job para reinicialização: adiciona as regras de log e DROP
+(crontab -l 2>/dev/null; echo "@reboot ipset restore < /opt/ipset-blocklist/ip-blocklist.restore && \
+iptables -I INPUT -m set --match-set blocklist src -j LOG --log-prefix 'BLOCKED_IP: ' --log-level 4 && \
+iptables -I INPUT -m set --match-set blocklist src -j DROP") | crontab -
+
+# Cron job para atualizar a blocklist 5 minutos após o reboot
+(crontab -l 2>/dev/null; echo "@reboot sleep 300 && /usr/local/sbin/update-blocklist.sh /opt/ipset-blocklist/ipset-blocklist.conf") | crontab -
+
+# Cron job para atualização periódica da blocklist (sem regras de iptables)
+(crontab -l 2>/dev/null; echo "0 */12 * * * /usr/local/sbin/update-blocklist.sh /opt/ipset-blocklist/ipset-blocklist.conf") | crontab -
+
+echo "Cron jobs configurados com sucesso."
+
 }
 
 # Função para desinstalar o IPSet Blocklist
 uninstall_ipset_blocklist() {
     # Remover regras do iptables e ipset
     iptables -D INPUT -m set --match-set blocklist src -j DROP 2>/dev/null
+    # Remove regra de log
+if iptables -C INPUT -m set --match-set blocklist src -j LOG --log-prefix "BLOCKED_IP: " --log-level 4 2>/dev/null; then
+  iptables -D INPUT -m set --match-set blocklist src -j LOG --log-prefix "BLOCKED_IP: " --log-level 4
+  echo "Regra de log removida."
+else
+  echo "Regra de log não encontrada."
+fi
     ipset destroy blocklist
 
     # Remover arquivos e diretórios
@@ -49,7 +67,7 @@ uninstall_ipset_blocklist() {
     rm -rf /opt/ipset-blocklist
 
     # Remover entradas do cron
-    crontab -l 2>/dev/null | grep -v 'update-blocklist.sh' | grep -v 'ipset restore' | crontab -
+    crontab -l 2>/dev/null | grep -v 'update-blocklist.sh' | grep -v 'iptables' | grep -v 'ipset restore' | crontab -
 
     echo "Desinstalação concluída com sucesso."
 }
