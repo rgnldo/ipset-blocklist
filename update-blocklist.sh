@@ -53,20 +53,28 @@ if ! ipset list -n | grep -q "$IPSET_BLOCKLIST_NAME"; then
 fi
 
 # Adiciona a regra iptables se ela não existir
-echo "Adiciona a regra iptables se ela não existir"
-# Verifica se a regra de iptables já existe
+echo "Verificando e adicionando regras iptables, se necessário."
+
+# Verifica se a regra de bloqueio já existe
 if ! iptables -nvL INPUT | grep -q "match-set $IPSET_BLOCKLIST_NAME"; then
-  # Se a regra não existir, adicionar a regra ao INPUT
-  if [[ ${FORCE:-no} != yes ]]; then
-    echo >&2 "Atenção: A regra iptables com ipset não existe. Adicionando..."
-    echo >&2 "# iptables -I INPUT ${IPTABLES_IPSET_RULE_NUMBER:-1} -m set --match-set $IPSET_BLOCKLIST_NAME src -j DROP"
+  echo >&2 "Atenção: A regra iptables com ipset não existe. Adicionando..."
+  
+  # Adiciona a regra de log para registrar os pacotes bloqueados (antes do DROP)
+  if ! iptables -nvL INPUT | grep -q "BLOCKED_IP:"; then
+    echo >&2 "Adicionando a regra de log ao iptables..."
+    if ! iptables -I INPUT "${IPTABLES_IPSET_RULE_NUMBER:-1}" -m set --match-set "$IPSET_BLOCKLIST_NAME" src -j LOG --log-prefix "BLOCKED_IP: " --log-level 4; then
+      echo >&2 "Erro: Falha ao adicionar a regra de log ao iptables."
+      exit 1
+    fi
   fi
 
-  # Adiciona a regra no iptables
+  # Adiciona a regra de bloqueio ao INPUT
   if ! iptables -I INPUT "${IPTABLES_IPSET_RULE_NUMBER:-1}" -m set --match-set "$IPSET_BLOCKLIST_NAME" src -j DROP; then
     echo >&2 "Erro: Falha ao adicionar a regra --match-set ipset ao iptables."
     exit 1
   fi
+
+  echo "Regras iptables com ipset e log adicionadas com sucesso."
 else
   echo "A regra iptables já existe. Nenhuma alteração foi feita."
 fi
