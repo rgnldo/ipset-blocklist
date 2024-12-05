@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Script para atualizar e aplicar blocklists com ipset e iptables
-# Uso: update-blocklist.sh <arquivo de configuração>
+# Uso: update-blocklist.sh /opt/ipset-blocklist/ipset-blocklist.conf
 
 # Função para verificar se o comando existe
 function exists() { command -v "$1" >/dev/null 2>&1 ; }
