@@ -113,50 +113,50 @@ uninstall_ipset_blocklist() {
 # Função para verificar o status do IPSet Blocklist
 check_status() {
     if [[ -f /opt/ipset-blocklist/ip-blocklist.restore && -f /usr/local/sbin/update-blocklist.sh ]]; then
-        echo "IPSet Blocklist está instalado."
+        echo -e "${GREEN}IPSet Blocklist está instalado.${NC}"
     else
-        echo "IPSet Blocklist não está instalado."
+        echo -e "${RED}IPSet Blocklist não está instalado.${NC}"
         return
     fi
 
-    # Verificar regras iptables
+    # Check iptables rules
     if iptables -S INPUT | grep -q 'blocklist src -j DROP'; then
-        echo "Regra DROP no iptables está ativa."
+        echo -e "${GREEN}Regra DROP no iptables está ativa.${NC}"
     else
-        echo "Regra DROP no iptables não está ativa."
+        echo -e "${RED}Regra DROP no iptables não está ativa.${NC}"
     fi
 
     if iptables -S INPUT | grep -q 'blocklist src -j LOG'; then
-        echo "Regra LOG no iptables está ativa."
+        echo -e "${GREEN}Regra LOG no iptables está ativa.${NC}"
     else
-        echo "Regra LOG no iptables não está ativa."
+        echo -e "${RED}Regra LOG no iptables não está ativa.${NC}"
     fi
 
-    # Verificar status do ipset
+    # Check ipset status
     if ipset list | grep -q 'blocklist'; then
-        echo "Ipset blocklist está ativo."
+        echo -e "${GREEN}Ipset blocklist está ativo.${NC}"
 
-        # Obter a contagem de IPs na lista
+        # Get IP count
         ip_count=$(ipset list blocklist | grep '^' | wc -l)
-        echo "Total de IPs bloqueados: $ip_count"
+        echo -e "${YELLOW}Total de IPs bloqueados: ${GREEN}${ip_count}${NC}"
 
-        # Obter a data da última atualização
+        # Get last update time
         last_update=$(stat -c %y /opt/ipset-blocklist/ip-blocklist.restore)
-        echo "Última atualização: $last_update"
+        echo -e "${YELLOW}Última atualização: ${GREEN}${last_update}${NC}"
 
-        # Verificar se houve bloqueios
+        # Check for blocklist actions
         log_file=$(grep 'LOGFILE' /opt/ipset-blocklist/ipset-blocklist.conf | cut -d '=' -f2 | tr -d ' ')
         if [[ -z "$log_file" ]]; then
-            log_file="/var/log/blocklist.log" # Padrão caso não seja especificado
+            log_file="/var/log/blocklist.log"
         fi
         if [[ -f "$log_file" ]]; then
             blocked_ips=$(grep 'BLOCKED_IP:' "$log_file" | wc -l)
-            echo "Total de bloqueios realizados: $blocked_ips"
+            echo -e "${YELLOW}Total de bloqueios realizados: ${GREEN}${blocked_ips}${NC}"
         else
-            echo "Arquivo de log não encontrado. O caminho do log está especificado corretamente na configuração?"
+            echo -e "${RED}Arquivo de log não encontrado. O caminho do log está especificado corretamente na configuração?${NC}"
         fi
     else
-        echo "Ipset blocklist não está ativo."
+        echo -e "${RED}Ipset blocklist não está ativo.${NC}"
     fi
 }
 
