@@ -1,141 +1,149 @@
-#!/bin/bash
+#!/usr/bin/env bash
+#
+# Script para atualizar e aplicar blocklists com ipset e iptables
+# Uso: update-blocklist.sh /opt/ipset-blocklist/ipset-blocklist.conf
 
-# Color variables for logging
-GREEN='\033[0;32m'
-RED='\033[0;31m'
-YELLOW='\033[0;33m'
-NC='\033[0m' # No Color
+# Função para verificar se o comando existe
+function exists() { command -v "$1" >/dev/null 2>&1 ; }
 
-# Constants and variables
-BLOCKLIST_INCOMING_URLS=(
-    "https://www.projecthoneypot.org/list_of_ips.php?t=d&rss=1"
-    "https://iplists.firehol.org/files/cybercrime.ipset"
-    # Add more incoming blocklist URLs here
-)
-
-BLOCKLIST_OUTGOING_URLS=(
-    "https://cpdbl.net/lists/sslblock.list"
-    "https://cpdbl.net/lists/ipsum.list"
-    # Add more outgoing blocklist URLs here
-)
-
-IPSET_INCOMING_NAME="incoming_blocklist"
-IPSET_OUTGOING_NAME="outgoing_blocklist"
-
-FILE_PATH_INCOMING="/opt/ipset-blocklist/incoming_blocklist.txt"
-FILE_PATH_OUTGOING="/opt/ipset-blocklist/outgoing_blocklist.txt"
-
-RESTORE_FILE_INCOMING="/opt/ipset-blocklist/incoming_blocklist.restore"
-RESTORE_FILE_OUTGOING="/opt/ipset-blocklist/outgoing_blocklist.restore"
-
-IPTABLES_IPSET_RULE_NUMBER=1
-
-# Function to check if a command exists
-command_exists() {
-    command -v "$1" >/dev/null 2>&1
-}
-
-# Function to log messages with colors
-log() {
-    local level="$1"
-    local message="$2"
-    echo -e "${level}[${message}]${NC}"
-}
-
-# Function to validate IP/CIDR
-validate_ip() {
-    [[ "$1" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}(/([0-9]|[1-2][0-9]|3[0-2]))?$ ]] || return 1
-    IFS='.' read -r -a octets <<< "$1"
-    for octet in "${octets[@]}"; do
-        [[ "$octet" -ge 0 && "$octet" -le 255 ]] || return 1
-    done
-    return 0
-}
-
-# Function to add iptables rules
-add_iptables_rules() {
-    local chain="$1"
-    local ipset_name="$2"
-    local prefix="$3"
-    local rule_num="${4:-1}"
-
-    if ! iptables -C "$chain" -m set --match-set "$ipset_name" src -j DROP 2>/dev/null; then
-        iptables -I "$chain" "$rule_num" -m set --match-set "$ipset_name" src -j LOG --log-prefix "$prefix" --log-level 4
-        iptables -I "$chain" "$rule_num" -m set --match-set "$ipset_name" src -j DROP
-        log "${GREEN}" "Regras iptables para $chain adicionadas."
-    else
-        log "${YELLOW}" "Regras iptables para $chain já existem."
+# Função para validar IP/CIDR
+function validate_ip() {
+  # Valida IPs ou CIDRs válidos
+  if [[ ! "$1" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}(/([0-9]|[1-2][0-9]|3[0-2]))?$ ]]; then
+    return 1  # IP inválido
+  fi
+  # Validando se os octetos do IP estão no intervalo correto (0-255)
+  IFS='.' read -r -a octets <<< "$1"
+  for octet in "${octets[@]}"; do
+    if [[ "$octet" -gt 255 || "$octet" -lt 0 ]]; then
+      return 1  # IP inválido
     fi
+  done
+  return 0  # IP válido
 }
 
-# Function to process blocklists
-process_blocklist() {
-    local urls=("$@")
-    local file_path="$1"
-    local valid_count=0
-    local invalid_count=0
-
-    > "$file_path" # Clear the file
-
-    for url in "${urls[@]}"; do
-        log "${YELLOW}" "Processando blocklist: $url"
-        result=$(curl -s "$url") || { log "${RED}" "Falha ao baixar $url."; continue; }
-
-        while read -r ip; do
-            if validate_ip "$ip"; then
-                echo "$ip" >> "$file_path"
-                ((valid_count++))
-            else
-                ((invalid_count++))
-            fi
-        done <<< "$(echo "$result" | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}(/[0-9]{1,2})?')"
-    done
-
-    # Filter out private and reserved IPs
-    sed -r -e '/^(0\.0\.0\.0|10\.|127\.|172\.1[6-9]\.|172\.2[0-9]\.|172\.3[0-1]\.|192\.168\.|22[4-9]\.|23[0-9]\.)/d' \
-        "$file_path" | sort -u > "${file_path}.tmp" && mv "${file_path}.tmp" "$file_path"
-
-    log "${GREEN}" "IPs válidos: $valid_count | IPs inválidos: $invalid_count"
-}
-
-# Main script logic
-if [ "$(id -u)" != "0" ]; then
-    log "${RED}" "Este script precisa ser executado como root."
-    exit 1
+# Verificação do arquivo de configuração
+if [[ -z "$1" ]]; then
+  echo "Erro: por favor, especifique um arquivo de configuração, ex: $0 /opt/ipset-blocklist/ipset-blocklist.conf"
+  exit 1
 fi
 
-# Install missing dependencies
-for pkg in ipset wget curl iptables; do
-    if ! command_exists "$pkg"; then
-        log "${YELLOW}" "Instalando $pkg..."
-        apt-get install -y "$pkg" || { log "${RED}" "Falha ao instalar $pkg."; exit 1; }
-    else
-        log "${GREEN}" "$pkg já instalado."
+# Carrega o arquivo de configuração
+if ! source "$1"; then
+  echo "Erro: não foi possível carregar o arquivo de configuração $1"
+  exit 1
+fi
+
+# Verifica se os comandos essenciais estão disponíveis
+if ! exists curl || ! exists grep || ! exists ipset || ! exists iptables || ! exists sed || ! exists sort || ! exists wc ; then
+  echo >&2 "Erro: faltam executáveis: curl grep ipset iptables sed sort wc"
+  exit 1
+fi
+
+# Verificação dos diretórios
+if [[ ! -d $(dirname "$IP_BLOCKLIST") || ! -d $(dirname "$IP_BLOCKLIST_RESTORE") ]]; then
+  echo >&2 "Erro: diretório(s) faltando: $(dirname "$IP_BLOCKLIST" "$IP_BLOCKLIST_RESTORE"|sort -u)"
+  exit 1
+fi
+
+# Criação do ipset se ele não existir
+if ! ipset list -n | grep -q "$IPSET_BLOCKLIST_NAME"; then
+  echo "Criando ipset $IPSET_BLOCKLIST_NAME"
+  ipset create "$IPSET_BLOCKLIST_NAME" -exist hash:net family inet hashsize "${HASHSIZE:-16384}" maxelem "${MAXELEM:-65536}"
+fi
+
+# Adiciona a regra iptables se ela não existir
+echo "Verificando e adicionando regras iptables, se necessário."
+
+# Verifica se a regra de bloqueio já existe
+if ! iptables -nvL INPUT | grep -q "match-set $IPSET_BLOCKLIST_NAME"; then
+  echo >&2 "Atenção: A regra iptables com ipset não existe. Adicionando..."
+  
+  # Adiciona a regra de log para registrar os pacotes bloqueados (antes do DROP)
+  if ! iptables -nvL INPUT | grep -q "BLOCKED_IP:"; then
+    echo >&2 "Adicionando a regra de log ao iptables..."
+    if ! iptables -I INPUT "${IPTABLES_IPSET_RULE_NUMBER:-1}" -m set --match-set "$IPSET_BLOCKLIST_NAME" src -j LOG --log-prefix "BLOCKED_IP: " --log-level 4; then
+      echo >&2 "Erro: Falha ao adicionar a regra de log ao iptables."
+      exit 1
     fi
+  fi
+
+  # Adiciona a regra de bloqueio ao INPUT
+  if ! iptables -I INPUT "${IPTABLES_IPSET_RULE_NUMBER:-1}" -m set --match-set "$IPSET_BLOCKLIST_NAME" src -j DROP; then
+    echo >&2 "Erro: Falha ao adicionar a regra --match-set ipset ao iptables."
+    exit 1
+  fi
+
+  echo "Regras iptables com ipset e log adicionadas com sucesso."
+else
+  echo "A regra iptables já existe. Nenhuma alteração foi feita."
+fi
+
+# Realiza o flush da lista do ipset
+echo "Realizando flush da lista do ipset $IPSET_BLOCKLIST_NAME"
+if ipset list "$IPSET_BLOCKLIST_NAME" >/dev/null 2>&1; then
+  ipset flush "$IPSET_BLOCKLIST_NAME"
+else
+  echo "Aviso: ipset não encontrado. Criando nova lista."
+fi
+
+# Processamento dos blocklists
+IP_BLOCKLIST_TMP=$(mktemp)
+invalid_ip_count=0
+valid_ip_count=0
+
+for url in "${BLOCKLISTS[@]}"; do
+  echo "Processando blocklist: $url"
+  result=$(curl -s "$url")
+  if [ -n "$result" ]; then
+    while read -r ip; do
+      # Valida o IP
+      if ! validate_ip "$ip"; then
+        invalid_ip_count=$((invalid_ip_count + 1))
+        continue  # Ignora o IP inválido
+      fi
+      echo "$ip" >> "$IP_BLOCKLIST_TMP"
+      valid_ip_count=$((valid_ip_count + 1))
+    done <<< "$(echo "$result" | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}(/[0-9]{1,2})?')"
+  else
+    echo "Sem resultado de: $url"
+  fi
 done
 
-# Create necessary directories
-mkdir -p /opt/ipset-blocklist || { log "${RED}" "Falha ao criar diretório."; exit 1; }
+# Relatório de IPs inválidos e válidos
+echo "IPs inválidos descartados: $invalid_ip_count"
+echo "IPs válidos processados: $valid_ip_count"
 
-# Process incoming blocklists
-process_blocklist "${BLOCKLIST_INCOMING_URLS[@]}" "$FILE_PATH_INCOMING"
+# Se não houver IPs válidos, aborta
+if [[ "$valid_ip_count" -eq 0 ]]; then
+  echo "Erro: nenhum IP válido encontrado. Abortando."
+  rm -f "$IP_BLOCKLIST_TMP"
+  exit 1
+fi
 
-# Process outgoing blocklists
-process_blocklist "${BLOCKLIST_OUTGOING_URLS[@]}" "$FILE_PATH_OUTGOING"
+# Elimina IPs locais, ordena e otimiza CIDR
+echo "Filtrando e otimizando os IPs..."
+sed -r -e '/^(0\.0\.0\.0|10\.|127\.|172\.1[6-9]\.|172\.2[0-9]\.|172\.3[0-1]\.|192\.168\.|22[4-9]\.|23[0-9]\.)/d' "$IP_BLOCKLIST_TMP" | sort -n | sort -mu >| "$IP_BLOCKLIST"
 
-# Update ipsets
-for set in "$IPSET_INCOMING_NAME" "$IPSET_OUTGOING_NAME"; do
-    if ! ipset list -n | grep -q "$set"; then
-        ipset create "$set" hash:net family inet hashsize 16384 maxelem 131072
-        log "${GREEN}" "Ipset $set criado."
-    fi
-done
+rm -f "$IP_BLOCKLIST_TMP"
 
-ipset restore -file "$FILE_PATH_INCOMING" -exist || { log "${RED}" "Falha ao restaurar ipset $IPSET_INCOMING_NAME."; exit 1; }
-ipset restore -file "$FILE_PATH_OUTGOING" -exist || { log "${RED}" "Falha ao restaurar ipset $IPSET_OUTGOING_NAME."; exit 1; }
+# Preparação do arquivo para o restore do ipset
+cat >| "$IP_BLOCKLIST_RESTORE" <<EOF
+create $IPSET_TMP_BLOCKLIST_NAME -exist hash:net family inet hashsize ${HASHSIZE:-16384} maxelem ${MAXELEM:-65536}
+create $IPSET_BLOCKLIST_NAME -exist hash:net family inet hashsize ${HASHSIZE:-16384} maxelem ${MAXELEM:-65536}
+EOF
 
-# Apply iptables rules
-add_iptables_rules "INPUT" "$IPSET_INCOMING_NAME" "BLOCKED_IN: " "$IPTABLES_IPSET_RULE_NUMBER"
-add_iptables_rules "OUTPUT" "$IPSET_OUTGOING_NAME" "BLOCKED_OUT: " "$IPTABLES_IPSET_RULE_NUMBER"
+# Processamento final do blocklist
+sed -rn -e '/^#|^$/d' -e "s/^([0-9./]+).*/add $IPSET_TMP_BLOCKLIST_NAME \\1/p" "$IP_BLOCKLIST" >> "$IP_BLOCKLIST_RESTORE"
 
-log "${GREEN}" "Configuração concluída com sucesso."
+cat >> "$IP_BLOCKLIST_RESTORE" <<EOF
+swap $IPSET_BLOCKLIST_NAME $IPSET_TMP_BLOCKLIST_NAME
+destroy $IPSET_TMP_BLOCKLIST_NAME
+EOF
+
+# Restaura o ipset
+echo "Atualizando a lista do ipset..."
+ipset -file "$IP_BLOCKLIST_RESTORE" restore
+
+# Relatório final
+echo "Endereços IP bloqueados: $(wc -l "$IP_BLOCKLIST" | cut -d' ' -f1)"
