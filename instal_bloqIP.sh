@@ -12,8 +12,8 @@ LOG_DIR="/var/log"
 REBOOT_SCRIPT="/usr/local/sbin/reboot_script.sh"
 UPDATE_SCRIPT="/usr/local/sbin/update-blocklist.sh"
 CRON_FILE="/etc/cron.d/ipset-blocklist"
-CONF_FILE="$BLOCKLIST_DIR/ipset-blocklist.conf"
 URL_BASE="https://raw.githubusercontent.com/rgnldo/ipset-blocklist/master"
+CONF_FILE="/etc/ipset-blocklist.conf"
 
 # Check for root privileges
 if [[ $EUID -ne 0 ]]; then
@@ -74,11 +74,11 @@ iptables -I OUTPUT -m set --match-set outgoing_blocklist dst -j LOG --log-prefix
 iptables -I OUTPUT -m set --match-set outgoing_blocklist dst -j DROP
 
 sleep 300
-"$UPDATE_SCRIPT" "$CONF_FILE"
+"$UPDATE_SCRIPT"
 EOF
     chmod +x "$REBOOT_SCRIPT"
 
-    wget -O "$CONF_FILE" "$URL_BASE/ipset-blocklist.conf" || log_error "Failed to download configuration file."
+    # Removed incomplete line
 
     "$UPDATE_SCRIPT" "$CONF_FILE" || log_error "Failed to execute update-blocklist.sh."
 
@@ -115,7 +115,7 @@ uninstall_ipset_blocklist() {
 
 # Function to check the status of the blocklist
 check_status() {
-    # (Implement status checking logic)
+    # Placeholder for status checking logic
     echo "Status check logic goes here."
 }
 
