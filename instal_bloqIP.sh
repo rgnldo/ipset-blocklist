@@ -84,7 +84,7 @@ EOF
 
     cat > "$CRON_FILE" << EOF
 @reboot root "$REBOOT_SCRIPT" >> "$LOG_DIR/blocklist_reboot.log" 2>&1
-0 */12 * * * root "$UPDATE_SCRIPT" "$CONF_FILE" >> "$LOG_DIR/blocklist_update.log" 2>&1
+0 */12 * * * root "$UPDATE_SCRIPT" >> "$LOG_DIR/blocklist_update.log" 2>&1
 EOF
     chmod 0644 "$CRON_FILE"
 
