@@ -13,7 +13,6 @@ REBOOT_SCRIPT="/usr/local/sbin/reboot_script.sh"
 UPDATE_SCRIPT="/usr/local/sbin/update-blocklist.sh"
 CRON_FILE="/etc/cron.d/ipset-blocklist"
 URL_BASE="https://raw.githubusercontent.com/rgnldo/ipset-blocklist/master"
-CONF_FILE="/etc/ipset-blocklist.conf"
 
 # Check for root privileges
 if [[ $EUID -ne 0 ]]; then
