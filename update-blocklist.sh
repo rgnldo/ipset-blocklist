@@ -79,11 +79,25 @@ done
 add_iptables_rules "INPUT" "$IPSET_INCOMING_NAME" "BLOCKED_IN: " "$IPTABLES_IPSET_RULE_NUMBER"
 add_iptables_rules "OUTPUT" "$IPSET_OUTGOING_NAME" "BLOCKED_OUT: " "$IPTABLES_IPSET_RULE_NUMBER"
 
+# Define blocklist URLs
+BLOCKLISTS_INCOMING=(
+    "https://www.projecthoneypot.org/list_of_ips.php?t=d&rss=1"
+    "https://iplists.firehol.org/files/cybercrime.ipset"
+    # ... (other URLs)
+)
+
+BLOCKLISTS_OUTGOING=(
+    "https://cpdbl.net/lists/sslblock.list"
+    "https://cpdbl.net/lists/ipsum.list"
+    # ... (other URLs)
+)
+
 # Processa blocklists
 process_blocklist() {
+    local ipset_name="$1"
+    shift
     local urls=("$@")
     local tmp_file="$(mktemp)"
-    local ipset_name="$1"
     local valid_count=0
     local invalid_count=0
 
@@ -108,8 +122,8 @@ process_blocklist() {
     rm -f "$tmp_file"
 }
 
-process_blocklist "${BLOCKLISTS_INCOMING[@]}" "$IP_BLOCKLIST_INCOMING"
-process_blocklist "${BLOCKLISTS_OUTGOING[@]}" "$IP_BLOCKLIST_OUTGOING"
+process_blocklist "$IP_BLOCKLIST_INCOMING" "${BLOCKLISTS_INCOMING[@]}"
+process_blocklist "$IP_BLOCKLIST_OUTGOING" "${BLOCKLISTS_OUTGOING[@]}"
 
 # Atualiza ipsets
 for ipset_restore in "$IP_BLOCKLIST_INCOMING_RESTORE" "$IP_BLOCKLIST_OUTGOING_RESTORE"; do
@@ -119,3 +133,16 @@ for ipset_restore in "$IP_BLOCKLIST_INCOMING_RESTORE" "$IP_BLOCKLIST_OUTGOING_RE
     }
     log "INFO" "Ipset atualizado: $ipset_restore"
 done
+
+# Ipset configuration
+IPSET_INCOMING_NAME="incoming_blocklist"
+IPSET_OUTGOING_NAME="outgoing_blocklist"
+
+# File paths for storing and restoring blocklists
+IP_BLOCKLIST_INCOMING="/opt/ipset-blocklist/incoming_blocklist.txt"
+IP_BLOCKLIST_OUTGOING="/opt/ipset-blocklist/outgoing_blocklist.txt"
+IP_BLOCKLIST_INCOMING_RESTORE="/opt/ipset-blocklist/incoming_blocklist.restore"
+IP_BLOCKLIST_OUTGOING_RESTORE="/opt/ipset-blocklist/outgoing_blocklist.restore"
+
+# Ipset parameters
+MAXELEM=131072                             # Maximum elements for ipsets
