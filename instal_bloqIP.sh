@@ -49,8 +49,13 @@ install_ipset_blocklist() {
     cat > /usr/local/sbin/reboot_script.sh << EOF
 #!/bin/bash
 
-# Restaurar ipset a partir do backup
-ipset restore < /opt/ipset-blocklist/ip-blocklist.restore
+# Criar o conjunto ipset 'blocklist' caso não exista
+ipset create blocklist hash:ip -exist
+
+# Restaurar ipset a partir do backup, caso existam backups
+if [ -f /opt/ipset-blocklist/ip-blocklist.restore ]; then
+    ipset restore < /opt/ipset-blocklist/ip-blocklist.restore
+fi
 
 # Adicionar regras iptables
 iptables -I INPUT -m set --match-set blocklist src -j LOG --log-prefix 'BLOCKED_IP: ' --log-level 4
