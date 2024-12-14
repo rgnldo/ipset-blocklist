@@ -40,9 +40,9 @@ if ! exists curl || ! exists grep || ! exists ipset || ! exists iptables || ! ex
   exit 1
 fi
 
-# Verificação dos diretórios
-if [[ ! -d $(dirname "$IP_BLOCKLIST") || ! -d $(dirname "$IP_BLOCKLIST_RESTORE") ]]; then
-  echo >&2 "Erro: diretório(s) faltando: $(dirname "$IP_BLOCKLIST" "$IP_BLOCKLIST_RESTORE"|sort -u)"
+# Verify directories correctly
+if [[ ! -d "$(dirname "$IP_BLOCKLIST")" || ! -d "$(dirname "$IP_BLOCKLIST_RESTORE")" ]]; then
+  echo >&2 "Error: missing directories: $(dirname "$IP_BLOCKLIST") or $(dirname "$IP_BLOCKLIST_RESTORE")"
   exit 1
 fi
 
