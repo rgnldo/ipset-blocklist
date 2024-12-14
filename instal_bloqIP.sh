@@ -1,213 +1,195 @@
 #!/bin/bash
 
-# Variáveis de cores
-VERDE='\033[0;32m'
-VERMELHO='\033[0;31m'
-AMARELO='\033[0;33m'
-NC='\033[0m' # Sem cor
-
-# Constantes
-DIRETORIO_BLOCKLIST="/opt/ipset-blocklist"
-DIRETORIO_LOG="/var/log"
-SCRIPT_REBOOT="/usr/local/sbin/reboot_script.sh"
-SCRIPT_ATUALIZAR="/usr/local/sbin/update-blocklist.sh"
-ARQUIVO_CRON="/etc/cron.d/ipset-blocklist"
-URL_BASE="https://raw.githubusercontent.com/rgnldo/ipset-blocklist/refs/heads/master"
-
-# Verificar se é root
-if [[ $EUID -ne 0 ]]; then
-    echo -e "${VERMELHO}Este script deve ser executado como root.${NC}"
-    exit 1
-fi
-
-# Função para registrar erros
-log_error() {
-    echo -e "${VERMELHO}[ERRO] $1${NC}"
-    exit 1
-}
-
-# Função para instalar pacotes
-instalar_pacote() {
-    local pacote=$1
-    if ! command -v "$pacote" &> /dev/null; then
-        echo -e "${AMARELO}Instalando $pacote...${NC}"
+# Função para instalar pacotes faltantes
+install_missing_packages() {
+    # Verificar e instalar ipset
+    if ! command -v ipset &> /dev/null; then
+        echo "Instalando ipset..."
         if command -v apt-get &> /dev/null; then
-            apt-get update && apt-get install -y "$pacote" || log_error "Falha ao instalar $pacote usando apt-get."
+            apt-get update && apt-get install -y ipset
         elif command -v yum &> /dev/null; then
-            yum install -y "$pacote" || log_error "Falha ao instalar $pacote usando yum."
+            yum install -y ipset
         elif command -v dnf &> /dev/null; then
-            dnf install -y "$pacote" || log_error "Falha ao instalar $pacote usando dnf."
+            dnf install -y ipset
         else
-            log_error "Gerenciador de pacotes não suportado. Instale $pacote manualmente."
+            echo "Gerenciador de pacotes não suportado. Instale o ipset manualmente."
+            exit 1
         fi
-    else
-        echo -e "${VERDE}$pacote já está instalado.${NC}"
+    fi
+
+    # Verificar e instalar wget
+    if ! command -v wget &> /dev/null; then
+        echo "Instalando wget..."
+        if command -v apt-get &> /dev/null; then
+            apt-get update && apt-get install -y wget
+        elif command -v yum &> /dev/null; then
+            yum install -y wget
+        elif command -v dnf &> /dev/null; then
+            dnf install -y wget
+        else
+            echo "Gerenciador de pacotes não suportado. Instale o wget manualmente."
+            exit 1
+        fi
     fi
 }
 
-# Instalar pacotes ausentes
-instalar_pacotes_ausentes() {
-    instalar_pacote ipset
-    instalar_pacote wget
-    instalar_pacote curl
-}
-
 # Função para instalar IPSet Blocklist
-instalar_ipset_blocklist() {
-    instalar_pacotes_ausentes
+install_ipset_blocklist() {
+    # Instalar pacotes faltantes
+    install_missing_packages
 
-    mkdir -p "$DIRETORIO_BLOCKLIST" || log_error "Falha ao criar o diretório $DIRETORIO_BLOCKLIST."
+    # Criar diretórios
+    mkdir -p /opt/ipset-blocklist
 
-    # Baixar o script de atualização (upd-bloqIP.sh)
-    wget -O "$SCRIPT_ATUALIZAR" "$URL_BASE/update-blocklist.sh" || log_error "Falha ao baixar update-blocklist.sh."
-    chmod +x "$SCRIPT_ATUALIZAR"
+    # Baixar scripts e configuração
+    wget -O /usr/local/sbin/update-blocklist.sh https://raw.githubusercontent.com/rgnldo/ipset-blocklist/master/update-blocklist.sh
+    chmod +x /usr/local/sbin/update-blocklist.sh
 
-    # Criar o script de reboot
-    cat > "$SCRIPT_REBOOT" << EOF
+    # Criar reboot_script.sh usando sed
+    cat > /usr/local/sbin/reboot_script.sh << EOF
 #!/bin/bash
 
-ipset restore < "$DIRETORIO_BLOCKLIST/incoming_blocklist.restore"
-ipset restore < "$DIRETORIO_BLOCKLIST/outgoing_blocklist.restore"
+# Restaurar ipset a partir do backup
+ipset restore < /opt/ipset-blocklist/ip-blocklist.restore
 
-iptables -I INPUT -m set --match-set incoming_blocklist src -j LOG --log-prefix 'BLOQUEADO_ENTRADA: ' --log-level 4
-iptables -I INPUT -m set --match-set incoming_blocklist src -j DROP
-iptables -I OUTPUT -m set --match-set outgoing_blocklist dst -j LOG --log-prefix 'BLOQUEADO_SAIDA: ' --log-level 4
-iptables -I OUTPUT -m set --match-set outgoing_blocklist dst -j DROP
+# Adicionar regras iptables
+iptables -I INPUT -m set --match-set blocklist src -j LOG --log-prefix 'BLOCKED_IP: ' --log-level 4
+iptables -I INPUT -m set --match-set blocklist src -j DROP
 
+# Aguardar por 5 minutos
 sleep 300
-"$SCRIPT_ATUALIZAR"
+
+# Atualizar blocklist
+/usr/local/sbin/update-blocklist.sh /opt/ipset-blocklist/ipset-blocklist.conf
 EOF
-    chmod +x "$SCRIPT_REBOOT"
+    chmod +x /usr/local/sbin/reboot_script.sh
 
-    # Executar o script de atualização para compilar as listas ipset
-    "$SCRIPT_ATUALIZAR" || log_error "Falha ao executar o script de atualização."
+    wget -O /opt/ipset-blocklist/ipset-blocklist.conf https://raw.githubusercontent.com/rgnldo/ipset-blocklist/master/ipset-blocklist.conf
 
-    # Configurar cron jobs
-    cat > "$ARQUIVO_CRON" << EOF
-@reboot root "$SCRIPT_REBOOT" >> "$DIRETORIO_LOG/blocklist_reboot.log" 2>&1
-0 */12 * * * root "$SCRIPT_ATUALIZAR" >> "$DIRETORIO_LOG/blocklist_update.log" 2>&1
+    # Gerar blocklist inicial
+    /usr/local/sbin/update-blocklist.sh /opt/ipset-blocklist/ipset-blocklist.conf
+
+    # Configurar trabalhos cron
+    cat > /etc/cron.d/ipset-blocklist << EOF
+@reboot root /usr/local/sbin/reboot_script.sh >> /var/log/blocklist_reboot.log 2>&1
+0 */12 * * * root /usr/local/sbin/update-blocklist.sh /opt/ipset-blocklist/ipset-blocklist.conf >> /var/log/blocklist_update.log 2>&1
 EOF
-    chmod 0644 "$ARQUIVO_CRON"
+    chmod 0644 /etc/cron.d/ipset-blocklist
 
-    echo -e "${VERDE}IPSet Blocklist instalado e trabalhos cron configurados com sucesso.${NC}"
+    echo "Trabalhos cron configurados com sucesso."
 }
 
-# Função para desinstalar
-desinstalar_ipset_blocklist() {
-    read -p "Tem certeza de que deseja desinstalar o IPSet Blocklist? (S/N): " confirmacao
+# Função para desinstalar IPSet Blocklist
+uninstall_ipset_blocklist() {
+    read -p "Tem certeza que deseja desinstalar o IPSet Blocklist? (S/N): " confirmacao
     if [[ "$confirmacao" != [Ss] ]]; then
         echo "Desinstalação cancelada."
         return
     fi
 
-    iptables -D INPUT -m set --match-set incoming_blocklist src -j DROP 2>/dev/null
-    iptables -D INPUT -m set --match-set incoming_blocklist src -j LOG 2>/dev/null
-    iptables -D OUTPUT -m set --match-set outgoing_blocklist dst -j DROP 2>/dev/null
-    iptables -D OUTPUT -m set --match-set outgoing_blocklist dst -j LOG 2>/dev/null
+    # Remover regras iptables
+    iptables -D INPUT -m set --match-set blocklist src -j DROP 2>/dev/null
+    iptables -D INPUT -m set --match-set blocklist src -j LOG --log-prefix "BLOCKED_IP: " --log-level 4 2>/dev/null
 
-    ipset destroy incoming_blocklist 2>/dev/null
-    ipset destroy outgoing_blocklist 2>/dev/null
+    # Destruir ipset
+    ipset destroy blocklist
 
-    rm -rf "$DIRETORIO_BLOCKLIST" "$SCRIPT_ATUALIZAR" "$SCRIPT_REBOOT" "$ARQUIVO_CRON" \
-           "$DIRETORIO_LOG/blocklist_reboot.log" "$DIRETORIO_LOG/blocklist_update.log"
+    # Remover scripts e arquivos de configuração
+    rm -rf /usr/local/sbin/update-blocklist.sh
+    rm -rf /usr/local/sbin/reboot_script.sh
+    rm -rf /opt/ipset-blocklist
 
-    echo -e "${VERDE}Desinstalação concluída com sucesso.${NC}"
+    # Remover trabalhos cron
+    rm -f /etc/cron.d/ipset-blocklist
+
+    # Remover arquivos de log, se existirem
+    rm -f /var/log/blocklist_reboot.log
+    rm -f /var/log/blocklist_update.log
+    rm -f /var/log/blocklist.log
+
+    echo "Desinstalação concluída com sucesso."
 }
 
 # Função para verificar o status do IPSet Blocklist
 check_status() {
-    # Verificar se os arquivos de restauração e o script de atualização existem
-    if [[ -f "$DIRETORIO_BLOCKLIST/incoming_blocklist.restore" && -f "$DIRETORIO_BLOCKLIST/outgoing_blocklist.restore" && -f "$SCRIPT_ATUALIZAR" ]]; then
-        echo -e "${VERDE}IPSet Blocklist está instalado.${NC}"
+    if [[ -f /opt/ipset-blocklist/ip-blocklist.restore && -f /usr/local/sbin/update-blocklist.sh ]]; then
+        echo -e "${GREEN}IPSet Blocklist está instalado.${NC}"
     else
-        echo -e "${VERMELHO}IPSet Blocklist não está instalado.${NC}"
+        echo -e "${RED}IPSet Blocklist não está instalado.${NC}"
         return
     fi
 
-    # Verificar regras DROP no iptables para entrada
-    if iptables -S INPUT | grep -q 'incoming_blocklist src -j DROP'; then
-        echo -e "${VERDE}Regra DROP no iptables para entrada está ativa.${NC}"
+    # Check iptables rules
+    if iptables -S INPUT | grep -q 'blocklist src -j DROP'; then
+        echo -e "${GREEN}Regra DROP no iptables está ativa.${NC}"
     else
-        echo -e "${VERMELHO}Regra DROP no iptables para entrada não está ativa.${NC}"
+        echo -e "${RED}Regra DROP no iptables não está ativa.${NC}"
     fi
 
-    # Verificar regras DROP no iptables para saída
-    if iptables -S OUTPUT | grep -q 'outgoing_blocklist dst -j DROP'; then
-        echo -e "${VERDE}Regra DROP no iptables para saída está ativa.${NC}"
+    if iptables -S INPUT | grep -q 'blocklist src -j LOG'; then
+        echo -e "${GREEN}Regra LOG no iptables está ativa.${NC}"
     else
-        echo -e "${VERMELHO}Regra DROP no iptables para saída não está ativa.${NC}"
+        echo -e "${RED}Regra LOG no iptables não está ativa.${NC}"
     fi
 
-    # Verificar regras LOG no iptables para entrada
-    if iptables -S INPUT | grep -q 'incoming_blocklist src -j LOG'; then
-        echo -e "${VERDE}Regra LOG no iptables para entrada está ativa.${NC}"
+    # Check ipset status
+    if ipset list | grep -q 'blocklist'; then
+        echo -e "${GREEN}Ipset blocklist está ativo.${NC}"
+
+        # Get IP count
+        ip_count=$(ipset list blocklist | grep '^' | wc -l)
+        echo -e "${YELLOW}Total de IPs bloqueados: ${GREEN}${ip_count}${NC}"
+
+        # Get last update time
+        last_update=$(stat -c %y /opt/ipset-blocklist/ip-blocklist.restore)
+        echo -e "${YELLOW}Última atualização: ${GREEN}${last_update}${NC}"
+
+        # Check for blocklist actions
+        log_file=$(grep 'LOGFILE' /opt/ipset-blocklist/ipset-blocklist.conf | cut -d '=' -f2 | tr -d ' ')
+        if [[ -z "$log_file" ]]; then
+            log_file="/var/log/blocklist.log"
+        fi
+        if [[ -f "$log_file" ]]; then
+            blocked_ips=$(grep 'BLOCKED_IP:' "$log_file" | wc -l)
+            echo -e "${YELLOW}Total de bloqueios realizados: ${GREEN}${blocked_ips}${NC}"
+        else
+            echo -e "${RED}Arquivo de log não encontrado. O caminho do log está especificado corretamente na configuração?${NC}"
+        fi
     else
-        echo -e "${VERMELHO}Regra LOG no iptables para entrada não está ativa.${NC}"
-    fi
-
-    # Verificar regras LOG no iptables para saída
-    if iptables -S OUTPUT | grep -q 'outgoing_blocklist dst -j LOG'; then
-        echo -e "${VERDE}Regra LOG no iptables para saída está ativa.${NC}"
-    else
-        echo -e "${VERMELHO}Regra LOG no iptables para saída não está ativa.${NC}"
-    fi
-
-    # Verificar status dos ipsets
-    if ipset list | grep -q 'incoming_blocklist'; then
-        echo -e "${VERDE}Ipset incoming_blocklist está ativo.${NC}"
-    else
-        echo -e "${VERMELHO}Ipset incoming_blocklist não está ativo.${NC}"
-    fi
-
-    if ipset list | grep -q 'outgoing_blocklist'; then
-        echo -e "${VERDE}Ipset outgoing_blocklist está ativo.${NC}"
-    else
-        echo -e "${VERMELHO}Ipset outgoing_blocklist não está ativo.${NC}"
-    fi
-
-    # Obter o total de IPs bloqueados
-    incoming_ips=$(ipset list incoming_blocklist | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}(/[0-9]{0,2})?' | wc -l)
-    outgoing_ips=$(ipset list outgoing_blocklist | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}(/[0-9]{0,2})?' | wc -l)
-    total_ips=$((incoming_ips + outgoing_ips))
-    echo -e "${AMARELO}Total de IPs bloqueados: ${VERDE}${total_ips}${NC}"
-
-    # Obter a última atualização das blocklists
-    last_update_incoming=$(stat -c %y "$DIRETORIO_BLOCKLIST/incoming_blocklist.restore")
-    last_update_outgoing=$(stat -c %y "$DIRETORIO_BLOCKLIST/outgoing_blocklist.restore")
-    echo -e "${AMARELO}Última atualização da blocklist de entrada: ${VERDE}${last_update_incoming}${NC}"
-    echo -e "${AMARELO}Última atualização da blocklist de saída: ${VERDE}${last_update_outgoing}${NC}"
-
-    # Obter o total de bloqueios realizados
-    log_file="/var/log/kern.log"
-    if [[ -f "$log_file" ]]; then
-        blocked_incoming=$(grep 'BLOQUEADO_ENTRADA:' "$log_file" | wc -l)
-        blocked_outgoing=$(grep 'BLOQUEADO_SAIDA:' "$log_file" | wc -l)
-        total_blocked=$((blocked_incoming + blocked_outgoing))
-        echo -e "${AMARELO}Total de bloqueios realizados para entrada: ${VERDE}${blocked_incoming}${NC}"
-        echo -e "${AMARELO}Total de bloqueios realizados para saída: ${VERDE}${blocked_outgoing}${NC}"
-        echo -e "${AMARELO}Total de bloqueios realizados: ${VERDE}${total_blocked}${NC}"
-    else
-        echo -e "${VERMELHO}Arquivo de log do kernel não encontrado. Verifique o caminho do log.${NC}"
+        echo -e "${RED}Ipset blocklist não está ativo.${NC}"
     fi
 }
 
-# Menu
+# Menu interativo
 while true; do
     clear
-    echo "Instalador de Blocklist IPSet"
+    echo "Instalador do IPSet Blocklist"
     echo "-----------------------------"
     echo "1. Instalar IPSet Blocklist"
     echo "2. Desinstalar IPSet Blocklist"
     echo "3. Verificar Status do Blocklist"
     echo "4. Sair"
 
-    read -p "Selecione uma opção (1/2/3/4): " opcao
+    read -p "Escolha uma opção (1/2/3/4): " opcao
 
     case $opcao in
-        1) instalar_ipset_blocklist ;;
-        2) desinstalar_ipset_blocklist ;;
-        3) check_status ;;
-        4) echo "Saindo."; exit 0 ;;
-        *) echo "Opção inválida. Por favor, tente novamente."; sleep 2 ;;
+        1)
+            install_ipset_blocklist
+            ;;
+        2)
+            uninstall_ipset_blocklist
+            ;;
+        3)
+            check_status
+            ;;
+        4)
+            echo "Saindo."
+            exit 0
+            ;;
+        *)
+            echo "Opção inválida. Tente novamente."
+            ;;
     esac
+
+    read -p "Pressione Enter para continuar..."
 done
