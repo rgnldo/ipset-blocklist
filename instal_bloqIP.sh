@@ -12,7 +12,7 @@ DIRETORIO_LOG="/var/log"
 SCRIPT_REBOOT="/usr/local/sbin/reboot_script.sh"
 SCRIPT_ATUALIZAR="/usr/local/sbin/update-blocklist.sh"
 ARQUIVO_CRON="/etc/cron.d/ipset-blocklist"
-URL_BASE="https://raw.githubusercontent.com/rgnldo/ipset-blocklist/master"
+URL_BASE="https://raw.githubusercontent.com/rgnldo/ipset-blocklist/refs/heads/master"
 
 # Verificar se é root
 if [[ $EUID -ne 0 ]]; then
@@ -58,9 +58,11 @@ instalar_ipset_blocklist() {
 
     mkdir -p "$DIRETORIO_BLOCKLIST" || log_error "Falha ao criar o diretório $DIRETORIO_BLOCKLIST."
 
+    # Baixar o script de atualização (upd-bloqIP.sh)
     wget -O "$SCRIPT_ATUALIZAR" "$URL_BASE/update-blocklist.sh" || log_error "Falha ao baixar update-blocklist.sh."
     chmod +x "$SCRIPT_ATUALIZAR"
 
+    # Criar o script de reboot
     cat > "$SCRIPT_REBOOT" << EOF
 #!/bin/bash
 
@@ -77,6 +79,10 @@ sleep 300
 EOF
     chmod +x "$SCRIPT_REBOOT"
 
+    # Executar o script de atualização para compilar as listas ipset
+    "$SCRIPT_ATUALIZAR" || log_error "Falha ao executar o script de atualização."
+
+    # Configurar cron jobs
     cat > "$ARQUIVO_CRON" << EOF
 @reboot root "$SCRIPT_REBOOT" >> "$DIRETORIO_LOG/blocklist_reboot.log" 2>&1
 0 */12 * * * root "$SCRIPT_ATUALIZAR" >> "$DIRETORIO_LOG/blocklist_update.log" 2>&1
