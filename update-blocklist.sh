@@ -4,6 +4,36 @@
 
 set -euo pipefail
 
+# Variáveis de configuração
+BLOCKLIST_DIR="/opt/ipset-blocklist"
+IPSET_ENTRADA_NOME="incoming_blocklist"
+IPSET_SAIDA_NOME="outgoing_blocklist"
+IP_BLOCKLIST_ENTRADA="$BLOCKLIST_DIR/incoming_blocklist.txt"
+IP_BLOCKLIST_SAIDA="$BLOCKLIST_DIR/outgoing_blocklist.txt"
+IP_BLOCKLIST_ENTRADA_RESTAURAR="$BLOCKLIST_DIR/incoming_blocklist.restore"
+IP_BLOCKLIST_SAIDA_RESTAURAR="$BLOCKLIST_DIR/outgoing_blocklist.restore"
+MAXELEM=131072
+
+# URLs das blocklists de entrada
+BLOCKLISTS_ENTRADA=(
+    "https://rules.emergingthreats.net/fwrules/emerging-Block-IPs.txt"
+    "https://s3.i02.estaleiro.serpro.gov.br/blocklist/blocklist.txt"
+    "https://talosintelligence.com/documents/ip-blacklist"
+    "https://iplists.firehol.org/files/alienvault_reputation.ipset"
+    "https://iplists.firehol.org/files/spamhaus_drop.netset"
+    "https://iplists.firehol.org/files/spamhaus_edrop.netset"
+    "https://iplists.firehol.org/files/ransomware_cryptowall_ps.ipset"
+    "https://iplists.firehol.org/files/ransomware_feed.ipset"
+    "https://iplists.firehol.org/files/normshield_all_ddosbot.ipset"
+    "https://blocklist.greensnow.co/greensnow.txt"
+)
+
+# URLs das blocklists de saída
+BLOCKLISTS_SAIDA=(
+    "https://cpdbl.net/lists/sslblock.list"
+    "https://cpdbl.net/lists/ipsum.list"
+)
+
 # Verifica se o script é executado como root
 if [ "$(id -u)" != "0" ]; then
     echo "Erro: este script precisa ser executado como root." >&2
@@ -47,17 +77,6 @@ adicionar_regras_iptables() {
         log "INFO" "Regras iptables para $cadeia já existem."
     fi
 }
-
-# Carregar configuração
-if [[ -z "$1" ]]; then
-    log "ERROR" "Por favor, especifique um arquivo de configuração."
-    exit 1
-fi
-
-if ! source "$1"; then
-    log "ERROR" "Não foi possível carregar o arquivo de configuração $1"
-    exit 1
-fi
 
 # Verifica comandos essenciais
 for cmd in curl grep ipset iptables sed sort mktemp; do
