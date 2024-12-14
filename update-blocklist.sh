@@ -13,6 +13,7 @@ IP_BLOCKLIST_SAIDA="$BLOCKLIST_DIR/outgoing_blocklist.txt"
 IP_BLOCKLIST_ENTRADA_RESTAURAR="$BLOCKLIST_DIR/incoming_blocklist.restore"
 IP_BLOCKLIST_SAIDA_RESTAURAR="$BLOCKLIST_DIR/outgoing_blocklist.restore"
 MAXELEM=131072
+REgra_IPTABLES_IPSET_NUMERO=1  # Número da regra no iptables
 
 # URLs das blocklists de entrada
 BLOCKLISTS_ENTRADA=(
