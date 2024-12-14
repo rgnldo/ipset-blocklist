@@ -73,13 +73,13 @@ iptables -I OUTPUT -m set --match-set outgoing_blocklist dst -j LOG --log-prefix
 iptables -I OUTPUT -m set --match-set outgoing_blocklist dst -j DROP
 
 sleep 300
-"$SCRIPT_ATUALIZAR" "$ARQUIVO_CONF"
+"$SCRIPT_ATUALIZAR"
 EOF
     chmod +x "$SCRIPT_REBOOT"
 
     cat > "$ARQUIVO_CRON" << EOF
 @reboot root "$SCRIPT_REBOOT" >> "$DIRETORIO_LOG/blocklist_reboot.log" 2>&1
-0 */12 * * * root "$SCRIPT_ATUALIZAR" "$ARQUIVO_CONF" >> "$DIRETORIO_LOG/blocklist_update.log" 2>&1
+0 */12 * * * root "$SCRIPT_ATUALIZAR" >> "$DIRETORIO_LOG/blocklist_update.log" 2>&1
 EOF
     chmod 0644 "$ARQUIVO_CRON"
 
@@ -108,10 +108,81 @@ desinstalar_ipset_blocklist() {
     echo -e "${VERDE}Desinstalação concluída com sucesso.${NC}"
 }
 
-# Função para verificar o status do blocklist
-verificar_status() {
-    # (Implementar lógica de verificação de status)
-    echo "Lógica de verificação de status aqui."
+# Função para verificar o status do IPSet Blocklist
+check_status() {
+    # Verificar se os arquivos de restauração e o script de atualização existem
+    if [[ -f "$DIRETORIO_BLOCKLIST/incoming_blocklist.restore" && -f "$DIRETORIO_BLOCKLIST/outgoing_blocklist.restore" && -f "$SCRIPT_ATUALIZAR" ]]; then
+        echo -e "${VERDE}IPSet Blocklist está instalado.${NC}"
+    else
+        echo -e "${VERMELHO}IPSet Blocklist não está instalado.${NC}"
+        return
+    fi
+
+    # Verificar regras DROP no iptables para entrada
+    if iptables -S INPUT | grep -q 'incoming_blocklist src -j DROP'; then
+        echo -e "${VERDE}Regra DROP no iptables para entrada está ativa.${NC}"
+    else
+        echo -e "${VERMELHO}Regra DROP no iptables para entrada não está ativa.${NC}"
+    fi
+
+    # Verificar regras DROP no iptables para saída
+    if iptables -S OUTPUT | grep -q 'outgoing_blocklist dst -j DROP'; then
+        echo -e "${VERDE}Regra DROP no iptables para saída está ativa.${NC}"
+    else
+        echo -e "${VERMELHO}Regra DROP no iptables para saída não está ativa.${NC}"
+    fi
+
+    # Verificar regras LOG no iptables para entrada
+    if iptables -S INPUT | grep -q 'incoming_blocklist src -j LOG'; then
+        echo -e "${VERDE}Regra LOG no iptables para entrada está ativa.${NC}"
+    else
+        echo -e "${VERMELHO}Regra LOG no iptables para entrada não está ativa.${NC}"
+    fi
+
+    # Verificar regras LOG no iptables para saída
+    if iptables -S OUTPUT | grep -q 'outgoing_blocklist dst -j LOG'; then
+        echo -e "${VERDE}Regra LOG no iptables para saída está ativa.${NC}"
+    else
+        echo -e "${VERMELHO}Regra LOG no iptables para saída não está ativa.${NC}"
+    fi
+
+    # Verificar status dos ipsets
+    if ipset list | grep -q 'incoming_blocklist'; then
+        echo -e "${VERDE}Ipset incoming_blocklist está ativo.${NC}"
+    else
+        echo -e "${VERMELHO}Ipset incoming_blocklist não está ativo.${NC}"
+    fi
+
+    if ipset list | grep -q 'outgoing_blocklist'; then
+        echo -e "${VERDE}Ipset outgoing_blocklist está ativo.${NC}"
+    else
+        echo -e "${VERMELHO}Ipset outgoing_blocklist não está ativo.${NC}"
+    fi
+
+    # Obter o total de IPs bloqueados
+    incoming_ips=$(ipset list incoming_blocklist | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}(/[0-9]{0,2})?' | wc -l)
+    outgoing_ips=$(ipset list outgoing_blocklist | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}(/[0-9]{0,2})?' | wc -l)
+    total_ips=$((incoming_ips + outgoing_ips))
+    echo -e "${AMARELO}Total de IPs bloqueados: ${VERDE}${total_ips}${NC}"
+
+    # Obter a última atualização das blocklists
+    last_update_incoming=$(stat -c %y "$DIRETORIO_BLOCKLIST/incoming_blocklist.restore")
+    last_update_outgoing=$(stat -c %y "$DIRETORIO_BLOCKLIST/outgoing_blocklist.restore")
+    echo -e "${AMARELO}Última atualização da blocklist de entrada: ${VERDE}${last_update_incoming}${NC}"
+    echo -e "${AMARELO}Última atualização da blocklist de saída: ${VERDE}${last_update_outgoing}${NC}"
+
+    # Obter o total de bloqueios realizados
+    log_file="/var/log/kern.log"
+    if [[ -f "$log_file" ]]; then
+        blocked_incoming=$(grep 'BLOQUEADO_ENTRADA:' "$log_file" | wc -l)
+        blocked_outgoing=$(grep 'BLOQUEADO_SAIDA:' "$log_file" | wc -l)
+        total_blocked=$((blocked_incoming + blocked_outgoing))
+        echo -e "${AMARELO}Total de bloqueios realizados para entrada: ${VERDE}${blocked_incoming}${NC}"
+        echo -e "${AMARELO}Total de bloqueios realizados para saída: ${VERDE}${blocked_outgoing}${NC}"
+        echo -e "${AMARELO}Total de bloqueios realizados: ${VERDE}${total_blocked}${NC}"
+    else
+        echo -e "${VERMELHO}Arquivo de log do kernel não encontrado. Verifique o caminho do log.${NC}"
+    fi
 }
 
 # Menu
@@ -129,7 +200,7 @@ while true; do
     case $opcao in
         1) instalar_ipset_blocklist ;;
         2) desinstalar_ipset_blocklist ;;
-        3) verificar_status ;;
+        3) check_status ;;
         4) echo "Saindo."; exit 0 ;;
         *) echo "Opção inválida. Por favor, tente novamente."; sleep 2 ;;
     esac
