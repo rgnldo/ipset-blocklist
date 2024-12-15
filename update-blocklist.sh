@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Script para atualizar e aplicar blocklists e allowlists com ipset e iptables
+# Script para atualizar e aplicar blocklists com ipset e iptables
 # Uso: update-blocklist.sh /opt/ipset-blocklist/ipset-blocklist.conf
 
 # Função para verificar se o comando existe
@@ -40,45 +40,25 @@ if ! exists curl || ! exists grep || ! exists ipset || ! exists iptables || ! ex
   exit 1
 fi
 
-# Verifica se as pastas de configuração existem
+# Verify directories correctly
 if [[ ! -d "$(dirname "$IP_BLOCKLIST")" || ! -d "$(dirname "$IP_BLOCKLIST_RESTORE")" ]]; then
-  echo >&2 "Erro: diretórios ausentes: $(dirname "$IP_BLOCKLIST") ou $(dirname "$IP_BLOCKLIST_RESTORE")"
+  echo >&2 "Error: missing directories: $(dirname "$IP_BLOCKLIST") or $(dirname "$IP_BLOCKLIST_RESTORE")"
   exit 1
 fi
 
-# Criação do ipset de blocklist se ele não existir
+# Criação do ipset se ele não existir
 if ! ipset list -n | grep -q "$IPSET_BLOCKLIST_NAME"; then
   echo "Criando ipset $IPSET_BLOCKLIST_NAME"
   ipset create "$IPSET_BLOCKLIST_NAME" -exist hash:net family inet hashsize "${HASHSIZE:-16384}" maxelem "${MAXELEM:-65536}"
 fi
 
-# Criação do ipset de allowlist se ele não existir
-if ! ipset list -n | grep -q "$IPSET_ALLOWLIST_NAME"; then
-  echo "Criando ipset $IPSET_ALLOWLIST_NAME"
-  ipset create "$IPSET_ALLOWLIST_NAME" -exist hash:net family inet hashsize "${HASHSIZE:-16384}" maxelem "${MAXELEM:-65536}"
-fi
-
 # Adiciona a regra iptables se ela não existir
 echo "Verificando e adicionando regras iptables, se necessário."
 
-# Verifica se a regra de allowlist já existe
-if ! iptables -nvL INPUT | grep -q "match-set $IPSET_ALLOWLIST_NAME"; then
-  echo >&2 "Atenção: A regra iptables com allowlist não existe. Adicionando..."
-
-  # Adiciona a regra para permitir IPs da allowlist
-  if ! iptables -I INPUT "${IPTABLES_ALLOWLIST_RULE_NUMBER:-1}" -m set --match-set "$IPSET_ALLOWLIST_NAME" src -j ACCEPT; then
-    echo >&2 "Erro: Falha ao adicionar a regra de allowlist ao iptables."
-    exit 1
-  fi
-  echo "Regra de allowlist no iptables adicionada com sucesso."
-else
-  echo "A regra iptables de allowlist já existe."
-fi
-
 # Verifica se a regra de bloqueio já existe
 if ! iptables -nvL INPUT | grep -q "match-set $IPSET_BLOCKLIST_NAME"; then
-  echo >&2 "Atenção: A regra iptables com ipset de blocklist não existe. Adicionando..."
-
+  echo >&2 "Atenção: A regra iptables com ipset não existe. Adicionando..."
+  
   # Adiciona a regra de log para registrar os pacotes bloqueados (antes do DROP)
   if ! iptables -nvL INPUT | grep -q "BLOCKED_IP:"; then
     echo >&2 "Adicionando a regra de log ao iptables..."
@@ -94,23 +74,17 @@ if ! iptables -nvL INPUT | grep -q "match-set $IPSET_BLOCKLIST_NAME"; then
     exit 1
   fi
 
-  echo "Regras iptables com ipset de blocklist e log adicionadas com sucesso."
+  echo "Regras iptables com ipset e log adicionadas com sucesso."
 else
-  echo "A regra iptables de blocklist já existe."
+  echo "A regra iptables já existe. Nenhuma alteração foi feita."
 fi
 
 # Realiza o flush da lista do ipset
-echo "Realizando flush da lista do ipset $IPSET_BLOCKLIST_NAME e $IPSET_ALLOWLIST_NAME"
+echo "Realizando flush da lista do ipset $IPSET_BLOCKLIST_NAME"
 if ipset list "$IPSET_BLOCKLIST_NAME" >/dev/null 2>&1; then
   ipset flush "$IPSET_BLOCKLIST_NAME"
 else
-  echo "Aviso: ipset $IPSET_BLOCKLIST_NAME não encontrado. Criando nova lista."
-fi
-
-if ipset list "$IPSET_ALLOWLIST_NAME" >/dev/null 2>&1; then
-  ipset flush "$IPSET_ALLOWLIST_NAME"
-else
-  echo "Aviso: ipset $IPSET_ALLOWLIST_NAME não encontrado. Criando nova lista."
+  echo "Aviso: ipset não encontrado. Criando nova lista."
 fi
 
 # Processamento dos blocklists
@@ -157,7 +131,6 @@ rm -f "$IP_BLOCKLIST_TMP"
 cat >| "$IP_BLOCKLIST_RESTORE" <<EOF
 create $IPSET_TMP_BLOCKLIST_NAME -exist hash:net family inet hashsize ${HASHSIZE:-16384} maxelem ${MAXELEM:-65536}
 create $IPSET_BLOCKLIST_NAME -exist hash:net family inet hashsize ${HASHSIZE:-16384} maxelem ${MAXELEM:-65536}
-create $IPSET_ALLOWLIST_NAME -exist hash:net family inet hashsize ${HASHSIZE:-16384} maxelem ${MAXELEM:-65536}
 EOF
 
 # Processamento final do blocklist
